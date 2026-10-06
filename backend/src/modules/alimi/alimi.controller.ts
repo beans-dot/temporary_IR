@@ -1,4 +1,4 @@
-import { Controller, Get, Post } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtPayload } from '../auth/jwt-payload';
@@ -14,8 +14,14 @@ export class AlimiController {
     return this.alimiService.listBatches();
   }
 
+  @Get('batch/status')
+  getBatchStatus() {
+    return this.alimiService.getBatchStatus();
+  }
+
   @Post('batch')
+  @HttpCode(HttpStatus.ACCEPTED)
   runBatch(@CurrentUser() admin: JwtPayload) {
-    return this.alimiService.runCurrentYearBatch(admin.sub);
+    return this.alimiService.startBatch(admin.sub, 'manual');
   }
 }

@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { randomUUID } from 'crypto';
 import { XMLParser } from 'fast-xml-parser';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { InjectDataSource } from '@nestjs/typeorm';
 import {
   IrDepartment,
@@ -25,6 +26,7 @@ import {
 } from '../metrics/metric-labels';
 import {
   AlimiFetchResult,
+  AlimiBatchStatus,
   CoreCategory,
   NormalizedUniversity,
   StatsApiGroup,
@@ -71,6 +73,31 @@ export class AlimiService {
     process.env.ALIMI_SERIES_OPERATION || 'getCodeByLargeSeries';
 
   private readonly statsGroups: StatsApiGroup[] = this.loadStatsGroups();
+
+  private readonly batchLockKey = 1_903_402_651;
+  private activeBatch: Promise<void> | null = null;
+  private batchStatus: AlimiBatchStatus = {
+    state: 'idle',
+    phase: 'idle',
+    runId: null,
+    trigger: null,
+    startedBy: null,
+    requestedYear: null,
+    year: null,
+    message: '실행 대기 중',
+    processed: 0,
+    total: 0,
+    upserted: 0,
+    departments: 0,
+    warnings: 0,
+    startedAt: null,
+    updatedAt: new Date().toISOString(),
+    finishedAt: null,
+    schedule: {
+      cron: process.env.ALIMI_BATCH_CRON || '0 0 3 1 * *',
+      timeZone: process.env.ALIMI_BATCH_TIME_ZONE || 'Asia/Seoul',
+    },
+  };
 
   /** 메타/식별 필드 — 지표값으로 취급하지 않음 */
   private readonly META_KEYS = new Set([
@@ -424,7 +451,30 @@ export class AlimiService {
         ? this.xmlParser.parse(trimmed)
         : JSON.parse(trimmed || '{}');
     }
-    const body = parsed?.response?.body ?? parsed?.body ?? {};
+    const commonError = parsed?.OpenAPI_ServiceResponse?.cmmMsgHeader;
+    if (commonError) {
+      const code = String(commonError?.returnReasonCode ?? '').trim();
+      const message = String(
+        commonError?.returnAuthMsg ?? commonError?.errMsg ?? '',
+      ).trim();
+      throw new Error(
+        `대학알리미 API 오류${code ? ` ${code}` : ''}${message ? `: ${message}` : ''}`,
+      );
+    }
+    const response = parsed?.response ?? parsed;
+    const header = response?.header ?? {};
+    const resultCode = String(header?.resultCode ?? '').trim();
+    const resultMsg = String(header?.resultMsg ?? '').trim();
+    if (resultCode && resultCode !== '00' && resultCode !== '0') {
+      throw new Error(
+        `대학알리미 API 오류 ${resultCode}${resultMsg ? `: ${resultMsg}` : ''}`,
+      );
+    }
+
+    const body = response?.body;
+    if (!body || typeof body !== 'object') {
+      throw new Error('대학알리미 API 응답 형식이 올바르지 않습니다.');
+    }
     const rawItems = body?.items?.item ?? [];
     const items: Record<string, unknown>[] = Array.isArray(rawItems)
       ? rawItems
@@ -711,10 +761,15 @@ export class AlimiService {
 
   // ---- 대학 마스터 동기화 ----
 
-  async syncUniversities(year: number): Promise<IrUniversityMaster[]> {
-    const result = await this.fetch(this.univService, this.univOperation, {
-      svyYr: year,
-    });
+  async syncUniversities(
+    year: number,
+    prefetched?: AlimiFetchResult,
+  ): Promise<IrUniversityMaster[]> {
+    const result =
+      prefetched ??
+      (await this.fetch(this.univService, this.univOperation, {
+        svyYr: year,
+      }));
     const seen = new Map<string, NormalizedUniversity>();
     for (const item of result.items) {
       const univCode = this.pick(item, ['schlId', 'univCode']);
@@ -868,6 +923,10 @@ export class AlimiService {
   async syncDepartments(
     year: number,
     onlyUnivCodes?: string[],
+    hooks?: {
+      onProgress?: (processed: number, total: number) => void;
+      onFailure?: (message: string) => void;
+    },
   ): Promise<number> {
     if (!this.deptService || !this.deptOperation) {
       this.logger.warn(
@@ -1073,9 +1132,11 @@ export class AlimiService {
             .execute();
         }
       } catch (err) {
+        const message = (err as Error).message;
         this.logger.warn(
-          `[ALIMI] 학과 (${year}, ${univ.univCode}) 실패: ${(err as Error).message}`,
+          `[ALIMI] 학과 (${year}, ${univ.univCode}) 실패: ${message}`,
         );
+        hooks?.onFailure?.(message);
       }
       return { active: localActive, closed: localClosed };
     };
@@ -1091,6 +1152,10 @@ export class AlimiService {
         activeCount += r.active;
         closedCount += r.closed;
       }
+      hooks?.onProgress?.(
+        Math.min(i + concurrency, univs.length),
+        univs.length,
+      );
       if (i + concurrency < univs.length) await this.sleep(delay);
       if ((i + concurrency) % 40 < concurrency) {
         this.logger.log(
@@ -1205,7 +1270,11 @@ export class AlimiService {
   async ingestStats(
     year: number,
     univCodes: string[],
-    opts?: { onlyServiceLabels?: string[] },
+    opts?: {
+      onlyServiceLabels?: string[];
+      onProgress?: (processed: number, total: number) => void;
+      onFailure?: (message: string) => void;
+    },
   ): Promise<number> {
     let upserted = 0;
     const delay = Number(process.env.ALIMI_CALL_DELAY_MS || 250);
@@ -1216,6 +1285,28 @@ export class AlimiService {
     const labelFilter = (opts?.onlyServiceLabels ?? [])
       .map((s) => s.trim())
       .filter(Boolean);
+    const operationFilter = (process.env.ALIMI_OP_FILTER || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const selectedOperationCount = this.statsGroups
+      .filter(
+        (group) =>
+          labelFilter.length === 0 || labelFilter.includes(group.serviceLabel),
+      )
+      .reduce(
+        (sum, group) =>
+          sum +
+          group.operations.filter(
+            (op) =>
+              operationFilter.length === 0 ||
+              operationFilter.includes(op.operation),
+          ).length,
+        0,
+      );
+    const totalRequests = selectedOperationCount * univCodes.length;
+    let processedRequests = 0;
+    opts?.onProgress?.(0, totalRequests);
     const categoryCache = new Map<string, number>();
     const metricCache = new Map<string, number>();
     const metricLocks = new Map<string, Promise<number>>();
@@ -1361,9 +1452,14 @@ export class AlimiService {
           }
         }
       } catch (err) {
+        const message = (err as Error).message;
         this.logger.warn(
-          `[ALIMI] ${group.service}/${op.operation} (${year}, ${code}) 실패: ${(err as Error).message}`,
+          `[ALIMI] ${group.service}/${op.operation} (${year}, ${code}) 실패: ${message}`,
         );
+        opts?.onFailure?.(message);
+      } finally {
+        processedRequests += 1;
+        opts?.onProgress?.(processedRequests, totalRequests);
       }
       return local;
     };
@@ -1398,11 +1494,12 @@ export class AlimiService {
         `[ALIMI] ${year} ${group.serviceLabel} (${group.operations.length} ops × ${univCodes.length} univ, concurrency=${concurrency})`,
       );
       for (const op of group.operations) {
-        const opFilter = (process.env.ALIMI_OP_FILTER || '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-        if (opFilter.length > 0 && !opFilter.includes(op.operation)) continue;
+        if (
+          operationFilter.length > 0 &&
+          !operationFilter.includes(op.operation)
+        ) {
+          continue;
+        }
 
         const counts = await mapPool(univCodes, concurrency, (code) =>
           ingestOne(group, op, code),
@@ -1429,38 +1526,291 @@ export class AlimiService {
     });
   }
 
-  async runCurrentYearBatch(
-    startedBy?: string,
-  ): Promise<{ year: number; upserted: number }> {
-    const year = this.currentYear;
-    const who = startedBy ? ` · 실행 ${startedBy}` : '';
-    try {
-      const univs = await this.syncUniversities(year);
-      await this.sleep(1500);
-      await this.syncDepartments(year).catch(() => 0);
-      await this.sleep(1500);
+  getBatchStatus(): AlimiBatchStatus {
+    return {
+      ...this.batchStatus,
+      schedule: { ...this.batchStatus.schedule },
+    };
+  }
 
+  private updateBatchStatus(
+    patch: Partial<Omit<AlimiBatchStatus, 'schedule'>>,
+  ): void {
+    this.batchStatus = {
+      ...this.batchStatus,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private async saveBatchLog(logText: string): Promise<void> {
+    try {
+      await this.dataSource.getRepository(IrUpdateLog).save({
+        updateType: 'ALIMI_BATCH',
+        logText,
+      });
+    } catch (err) {
+      this.logger.error(
+        `[ALIMI] 배치 이력 저장 실패: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private async acquireBatchLock(): Promise<QueryRunner> {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    try {
+      const rows = (await runner.query(
+        'SELECT pg_try_advisory_lock($1) AS locked',
+        [this.batchLockKey],
+      )) as Array<{ locked: boolean }>;
+      if (!rows[0]?.locked) {
+        throw new ConflictException('대학알리미 배치가 이미 실행 중입니다.');
+      }
+      return runner;
+    } catch (err) {
+      await runner.release();
+      throw err;
+    }
+  }
+
+  private async releaseBatchLock(runner: QueryRunner): Promise<void> {
+    try {
+      await runner.query('SELECT pg_advisory_unlock($1)', [
+        this.batchLockKey,
+      ]);
+    } finally {
+      await runner.release();
+    }
+  }
+
+  async startBatch(
+    startedBy?: string,
+    trigger: 'manual' | 'scheduled' = 'manual',
+  ): Promise<AlimiBatchStatus> {
+    if (this.activeBatch) {
+      throw new ConflictException('대학알리미 배치가 이미 실행 중입니다.');
+    }
+
+    const runner = await this.acquireBatchLock();
+    const now = new Date().toISOString();
+    this.batchStatus = {
+      ...this.batchStatus,
+      state: 'running',
+      phase: 'checking',
+      runId: randomUUID(),
+      trigger,
+      startedBy: startedBy ?? null,
+      requestedYear: this.currentYear,
+      year: null,
+      message: '대학알리미 최신 공개연도를 확인하고 있습니다.',
+      processed: 0,
+      total: 0,
+      upserted: 0,
+      departments: 0,
+      warnings: 0,
+      startedAt: now,
+      updatedAt: now,
+      finishedAt: null,
+    };
+
+    const task = this.executeLatestAvailableBatch(startedBy, trigger).finally(
+      async () => {
+        try {
+          await this.releaseBatchLock(runner);
+        } catch (err) {
+          this.logger.error(
+            `[ALIMI] 배치 잠금 해제 실패: ${(err as Error).message}`,
+          );
+        } finally {
+          this.activeBatch = null;
+        }
+      },
+    );
+    this.activeBatch = task;
+    void task;
+
+    return this.getBatchStatus();
+  }
+
+  private async executeLatestAvailableBatch(
+    startedBy?: string,
+    trigger: 'manual' | 'scheduled' = 'manual',
+  ): Promise<void> {
+    const requestedYear = this.currentYear;
+    const who = startedBy
+      ? ` · 실행 ${startedBy}`
+      : trigger === 'scheduled'
+        ? ' · 자동 실행'
+        : '';
+    let selectedYear: number | null = null;
+
+    try {
+      const rawLookback = Number(process.env.ALIMI_YEAR_LOOKBACK || 3);
+      const lookback = Number.isFinite(rawLookback)
+        ? Math.min(Math.max(Math.floor(rawLookback), 0), 10)
+        : 3;
+      let universityResult: AlimiFetchResult | null = null;
+
+      for (let offset = 0; offset <= lookback; offset++) {
+        const candidateYear = requestedYear - offset;
+        this.updateBatchStatus({
+          phase: 'checking',
+          message: `${candidateYear}년 대학알리미 공개 여부를 확인하고 있습니다.`,
+          processed: offset,
+          total: lookback + 1,
+        });
+        const result = await this.fetch(
+          this.univService,
+          this.univOperation,
+          { svyYr: candidateYear },
+        );
+        if (result.totalCount > 0 && result.items.length > 0) {
+          selectedYear = candidateYear;
+          universityResult = result;
+          break;
+        }
+      }
+
+      if (!selectedYear || !universityResult) {
+        const message = `${requestedYear}년부터 ${requestedYear - lookback}년까지 공개된 대학알리미 데이터가 없습니다.`;
+        this.updateBatchStatus({
+          state: 'no_data',
+          phase: 'done',
+          message,
+          processed: lookback + 1,
+          total: lookback + 1,
+          finishedAt: new Date().toISOString(),
+        });
+        await this.saveBatchLog(`대학알리미 정기 배치 미실행: ${message}${who}`);
+        return;
+      }
+
+      const fallbackText =
+        selectedYear === requestedYear
+          ? `${selectedYear}년`
+          : `요청 ${requestedYear}년 → 최신 공개 ${selectedYear}년`;
+      this.updateBatchStatus({
+        phase: 'universities',
+        year: selectedYear,
+        message: `${fallbackText} 대학 목록을 반영하고 있습니다.`,
+        processed: 0,
+        total: universityResult.totalCount,
+      });
+      const univs = await this.syncUniversities(
+        selectedYear,
+        universityResult,
+      );
+      if (univs.length === 0) {
+        throw new Error(
+          `${selectedYear}년 대학 목록 응답을 데이터로 변환하지 못했습니다.`,
+        );
+      }
+      this.updateBatchStatus({
+        processed: univs.length,
+        total: univs.length,
+      });
+
+      await this.sleep(1500);
+      let warnings = 0;
+      const allUniversityCodes = univs.map((univ) => univ.univCode);
+      this.updateBatchStatus({
+        phase: 'departments',
+        message: `${selectedYear}년 학과 정보를 동기화하고 있습니다.`,
+        processed: 0,
+        total: allUniversityCodes.length,
+      });
+      const departments = await this.syncDepartments(
+        selectedYear,
+        allUniversityCodes,
+        {
+          onProgress: (processed, total) =>
+            this.updateBatchStatus({ processed, total }),
+          onFailure: () => {
+            warnings += 1;
+            this.updateBatchStatus({ warnings });
+          },
+        },
+      );
+
+      await this.sleep(1500);
       const limit = this.parseUnivLimit(process.env.ALIMI_STATS_UNIV_LIMIT);
       const ysu = process.env.YSU_UNIV_CODE || '';
       const codes = this.selectUnivCodes(univs, ysu, limit);
-      const upserted = await this.ingestStats(year, codes);
+      let statsFailures = 0;
+      this.updateBatchStatus({
+        phase: 'statistics',
+        message: `${selectedYear}년 통계 지표를 동기화하고 있습니다.`,
+        processed: 0,
+        total: 0,
+        departments,
+      });
+      const upserted = await this.ingestStats(selectedYear, codes, {
+        onProgress: (processed, total) =>
+          this.updateBatchStatus({ processed, total }),
+        onFailure: () => {
+          warnings += 1;
+          statsFailures += 1;
+          this.updateBatchStatus({ warnings });
+        },
+      });
 
-      // 배치 종료 시 한 번 더 보장 (학과동기화·통계 모두 반영)
+      if (this.batchStatus.total > 0 && statsFailures >= this.batchStatus.total) {
+        throw new Error('모든 대학알리미 통계 API 호출이 실패했습니다.');
+      }
+
+      this.updateBatchStatus({
+        phase: 'finalizing',
+        message: '지표명과 배치 이력을 정리하고 있습니다.',
+        upserted,
+        departments,
+      });
       await syncDeptLevelMetricNames(this.dataSource);
 
-      await this.dataSource.getRepository(IrUpdateLog).save({
-        updateType: 'ALIMI_BATCH',
-        logText: `대학알리미 정기 배치 완료 (${year}년, 지표 ${upserted}건 반영)${who}`,
+      const state = warnings > 0 ? 'completed_with_warnings' : 'completed';
+      const message = `${fallbackText}, 지표 ${upserted}건·학과 ${departments}건 반영${warnings > 0 ? `, 경고 ${warnings}건` : ''}`;
+      this.updateBatchStatus({
+        state,
+        phase: 'done',
+        message,
+        upserted,
+        departments,
+        warnings,
+        finishedAt: new Date().toISOString(),
       });
-      return { year, upserted };
+      await this.saveBatchLog(
+        `대학알리미 정기 배치 ${warnings > 0 ? '부분 완료' : '완료'} (${message})${who}`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      await this.dataSource.getRepository(IrUpdateLog).save({
-        updateType: 'ALIMI_BATCH',
-        logText: `대학알리미 정기 배치 실패 (${year}년)${who}: ${message}`,
+      this.updateBatchStatus({
+        state: 'failed',
+        phase: 'done',
+        year: selectedYear,
+        message,
+        finishedAt: new Date().toISOString(),
       });
-      throw err;
+      await this.saveBatchLog(
+        `대학알리미 정기 배치 실패 (${selectedYear ?? requestedYear}년)${who}: ${message}`,
+      );
+      this.logger.error(`[ALIMI] 정기 배치 실패: ${message}`);
     }
+  }
+
+  async runCurrentYearBatch(
+    startedBy?: string,
+  ): Promise<{ year: number; upserted: number }> {
+    await this.startBatch(startedBy, 'manual');
+    const task = this.activeBatch;
+    if (task) await task;
+    const status = this.getBatchStatus();
+    if (status.state === 'failed' || status.state === 'no_data') {
+      throw new Error(status.message);
+    }
+    return {
+      year: status.year ?? this.currentYear,
+      upserted: status.upserted,
+    };
   }
 
   /** 미설정·0 이하면 무제한(전체 대학). */

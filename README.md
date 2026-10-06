@@ -88,7 +88,8 @@ docker compose run --rm backend npm run seed
 | GET | `/api/universities/tree` | 대상 Multi-depth 트리 |
 | POST | `/api/pivot` | 1차 피벗 JSON (행: 대상/지표, 열: 연도) |
 | POST | `/api/upload/excel` | 자체 데이터 업로드 (3단계 검증) |
-| POST | `/api/alimi/batch` | 대학알리미 당해 연도 배치 |
+| POST | `/api/alimi/batch` | 대학알리미 최신 공개연도 배치 시작(202 Accepted) |
+| GET | `/api/alimi/batch/status` | 배치 단계·진행률·결과 조회 |
 | GET/POST/DELETE | `/api/presets` | 프리셋 저장/로드 |
 | GET | `/api/update-log/latest` | Ticker 최신 1건 |
 
@@ -108,6 +109,10 @@ docker compose run --rm backend npm run seed
 - **XML/JSON 이중 파싱** — `fast-xml-parser` 로 XML 응답을, JSON 응답은 `JSON.parse` 로 처리.
 - **Rate Limit 방어** — operation/연도 순회 시 `setTimeout` 딜레이(`ALIMI_CALL_DELAY_MS`, 기본 800ms).
 - **Upsert(ON CONFLICT)** — `(year, univ_code, dept_code, metric_id)` 기준. 정기 배치 시 타 대학의 정정 공시가 자동 반영됩니다.
+- **최신 공개연도 자동 선택** — 현재 연도 자료가 0건이면 `ALIMI_YEAR_LOOKBACK` 범위에서 가장 최근 공개연도를 찾아 동기화합니다.
+- **월간 자동 배치** — 기본 매월 1일 03:00(Asia/Seoul), `ALIMI_BATCH_CRON`과 `ALIMI_BATCH_TIME_ZONE`으로 조정합니다.
+- **중복 실행 방지** — PostgreSQL advisory lock으로 수동·자동 배치가 겹쳐도 하나만 실행합니다.
+- **백그라운드 실행** — 수동 API는 즉시 202를 반환하며 진행 상태는 `/api/alimi/batch/status`에서 확인합니다.
 
 ### 소스 구성
 

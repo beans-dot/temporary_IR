@@ -37,6 +37,46 @@ export interface AlimiFetchResult {
   items: Record<string, unknown>[];
 }
 
+export type AlimiBatchState =
+  | 'idle'
+  | 'running'
+  | 'completed'
+  | 'completed_with_warnings'
+  | 'no_data'
+  | 'failed';
+
+export type AlimiBatchPhase =
+  | 'idle'
+  | 'checking'
+  | 'universities'
+  | 'departments'
+  | 'statistics'
+  | 'finalizing'
+  | 'done';
+
+export interface AlimiBatchStatus {
+  state: AlimiBatchState;
+  phase: AlimiBatchPhase;
+  runId: string | null;
+  trigger: 'manual' | 'scheduled' | null;
+  startedBy: string | null;
+  requestedYear: number | null;
+  year: number | null;
+  message: string;
+  processed: number;
+  total: number;
+  upserted: number;
+  departments: number;
+  warnings: number;
+  startedAt: string | null;
+  updatedAt: string;
+  finishedAt: string | null;
+  schedule: {
+    cron: string;
+    timeZone: string;
+  };
+}
+
 // 정규화된 대학 마스터 레코드
 export interface NormalizedUniversity {
   univCode: string;
