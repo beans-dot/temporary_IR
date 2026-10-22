@@ -8,7 +8,8 @@
 IR_dashboard/
 ├─ frontend/   Next.js 14 (App Router) + TypeScript + Tailwind + shadcn/ui + Recharts + Zustand
 ├─ backend/    NestJS + TypeORM + PostgreSQL
-├─ docker-compose.yml
+├─ scripts/    로컬 PostgreSQL 초기화 (init-db.ps1)
+├─ package.json
 └─ .env.example
 ```
 
@@ -36,48 +37,48 @@ IR_dashboard/
 - 프론트엔드 트리는 모든 노드에 체크박스 + **Cascade Select All**(부모 체크 시 하위 전체 연쇄 선택/해제, 부분 선택은 indeterminate)을 지원합니다.
 - **자체 지표 상호 배타**: `selectedTargets`에 타 대학이 1개라도 있으면 Dual-Listbox의 `[자체]`(INTERNAL) 지표는 `disabled` 처리됩니다.
 
-## 로컬 개발
+## 로컬 실행
+
+Node.js와 이 PC에 설치된 PostgreSQL을 사용합니다. 스키마가 `jsonb`, advisory lock을 쓰므로 데이터베이스 엔진은 PostgreSQL입니다. 저장소 루트의 `.env`는 `localhost:5432`를 가리키고, 프론트엔드는 `http://localhost:4000/api`로 프록시합니다.
 
 ### 1) 사전 준비
 
-```bash
-cp .env.example .env   # 후 DATA_GO_KR_KEY 등 실제 값 입력
-```
-
-### 2) 데이터베이스
-
-`docker compose up -d db` 로 PostgreSQL 만 먼저 띄웁니다.
-호스트에 이미 PostgreSQL(5432)이 있는 경우 충돌을 피하기 위해 컨테이너는 호스트 포트 **5433** 으로 노출됩니다(`DB_HOST_PORT`). 로컬 백엔드(`backend/.env`)의 `DB_PORT` 도 5433 로 맞춰져 있습니다.
-
-### 3) 백엔드
+PostgreSQL 15 이상을 설치하고 서비스를 실행합니다. Windows 설치 파일은 https://www.postgresql.org/download/windows/ 입니다.
 
 ```bash
-cd backend
-npm install
-npm run start:dev     # http://localhost:4000/api
-npm run seed          # 초기 시딩 (4대 카테고리 + 과거 5개년 대학알리미 Upsert)
+copy .env.example .env
 ```
 
-### 4) 프론트엔드
+`.env`의 `DATA_GO_KR_KEY`, `JWT_SECRET`을 실제 값으로 바꿉니다. `backend/.env`가 있으면 그 값이 루트 `.env`보다 우선합니다.
+
+### 2) 데이터베이스 계정
+
+슈퍼유저(`postgres`) 비밀번호로 앱 전용 역할과 데이터베이스를 만듭니다. 이미 있으면 비밀번호만 `.env`와 맞춥니다.
+
+```powershell
+$env:POSTGRES_SUPER_PASSWORD = "<postgres 슈퍼유저 비밀번호>"
+npm run db:init
+```
+
+### 3) 의존성 설치와 개발 서버
+
+저장소 루트에서 백엔드(4000)와 프론트엔드(3000)를 함께 띄웁니다.
 
 ```bash
-cd frontend
-npm install
-npm run dev           # http://localhost:3000
+npm run install:all
+npm run dev
 ```
 
-## Docker (온프레미스 배포)
+- 화면: http://localhost:3000
+- API: http://localhost:4000/api
+
+최초 1회 시딩(4대 카테고리 + 대학알리미 Upsert)은 별도입니다. API 키가 있어야 하며 시간이 걸립니다.
 
 ```bash
-cp .env.example .env  # DATA_GO_KR_KEY 입력
-docker compose build
-docker compose up -d
-# 최초 1회 시딩
-docker compose run --rm backend npm run seed
+npm run seed
 ```
 
-- `db`: `postgres:15-alpine`, 호스트 `./data/postgres` ↔ 컨테이너 `/var/lib/postgresql/data` 바인딩(영속화)
-- `backend`/`frontend`: 멀티스테이지 빌드, `depends_on`으로 DB 기동 이후 실행
+운영처럼 빌드 결과만 실행할 때는 `npm run build` 다음 `npm run start` 입니다.
 
 ## 주요 API
 
@@ -95,10 +96,13 @@ docker compose run --rm backend npm run seed
 
 ## 업로드 엑셀 형식
 
-헤더: `year, univ_code, dept_code, metric_id, metric_value`
+헤더: `year, univ_code, dept_code, metric_id, metric_name, metric_value`
 
 - 결측치(빈칸/undefined)는 거부됩니다. 값이 없으면 문자열 `NULL` 또는 숫자 `0`을 입력하세요.
 - 기존 데이터 존재 시 덮어쓰기 확인, 마감(잠금) 연도는 2차 경고 후 진행합니다. 실패 시 전체 롤백됩니다.
+- 자체 데이터(`INTERNAL`)와 모니터링(`MONITORING`) 업로드는 분리되며, 생성 양식의 `source_type`이 다른 업로드 영역에서는 거부됩니다.
+- 정보공시(`ALIMI`)는 개별 수정·엑셀 업로드가 불가하며 대학알리미 연동으로만 갱신합니다.
+- 일반 업로드는 신규 지표를 자동 생성하지 않습니다. 지표 DB 관리에서 먼저 등록하고 최신 양식의 `metric_id`를 사용해야 합니다.
 
 ## 대학알리미 OpenAPI 연동 (실데이터 파이프라인)
 

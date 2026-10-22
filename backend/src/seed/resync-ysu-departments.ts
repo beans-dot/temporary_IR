@@ -3,12 +3,10 @@
  *   npx ts-node -r tsconfig-paths/register src/seed/resync-ysu-departments.ts
  */
 import 'reflect-metadata';
-import * as dotenv from 'dotenv';
+import '../config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../app.module';
 import { AlimiService } from '../modules/alimi/alimi.service';
-
-dotenv.config();
 
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, {

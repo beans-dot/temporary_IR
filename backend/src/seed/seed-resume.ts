@@ -6,15 +6,13 @@
  *   npm run seed:resume
  */
 import 'reflect-metadata';
-import * as dotenv from 'dotenv';
+import '../config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../app.module';
 import { IrUniversityMaster, IrUpdateLog } from '../entities';
 import { AlimiService } from '../modules/alimi/alimi.service';
-
-dotenv.config();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

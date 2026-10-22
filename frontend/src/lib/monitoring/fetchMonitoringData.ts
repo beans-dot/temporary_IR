@@ -8,7 +8,11 @@ import {
   type TargetTreeNode,
 } from '@/lib/api';
 import { hasHierarchyData, readYearValue } from './aggregate';
-import { MONITORING_KPI_MAP, STUDENT_COUNT_COMPONENT_SHORT_LABELS } from './catalog';
+import {
+  MONITORING_KPI_MAP,
+  STUDENT_COUNT_COMPONENT_CODES,
+  STUDENT_COUNT_COMPONENT_SHORT_LABELS,
+} from './catalog';
 import { composeAccountingHierarchy } from './composeAccounting';
 import {
   composeFormulaHierarchy,
@@ -31,6 +35,7 @@ import type {
   MonitoringCategoryDef,
   MonitoringKpiDef,
   MonitoringKpiId,
+  MonitoringValueSource,
   OrgStructure,
   StudentCountBreakdown,
   StudentCountComponentKey,
@@ -40,13 +45,22 @@ import type {
   YearValueMap,
   YoySnapshot,
 } from './types';
+
+interface MonitoringOfficialLinksResponse {
+  years: number[];
+  links: Array<{
+    monitoringMetricCode: string;
+    alimiMetricId: number;
+    alimiMetricName: string;
+  }>;
+}
 import { computeYoy, trendYearWindow } from './yoy';
 import { analyzeFormula } from './formula';
 
 export interface MonitoringBundle {
   /** 피벗에 요청한 전체 연도 (추이 창 포함) */
   years: number[];
-  /** DB에 모니터링 값이 있는 연도 (조회 년도 드롭다운) */
+  /** 모니터링 입력값 또는 자동연결 정보공시값이 있는 연도 */
   availableYears: number[];
   org: OrgStructure;
   /** 시드 카테고리 코드 → 현재 카테고리명 (지표 DB 빌더에서 바꾼 이름) */
@@ -61,9 +75,17 @@ export interface MonitoringBundle {
       unit: string | null;
       found: boolean;
       values: HierarchyValues;
+      /** 대학알리미 대학 전체값을 사용한 연도 */
+      officialYears: number[];
     }
   >;
   studentComponents: Record<StudentCountComponentKey, HierarchyValues>;
+  /** 재학생 총계(정원 내+외) 대학알리미 값 */
+  studentOfficialTotal: YearValueMap;
+  studentOfficialTotalYears: number[];
+  studentComponentOfficialYears: Partial<
+    Record<StudentCountComponentKey, number[]>
+  >;
   studentMeta: {
     kpi: MonitoringKpiDef;
     label: string;
@@ -94,6 +116,9 @@ export interface MonitoringBundle {
       formulaLabel: string;
       node: FormulaEvalNode;
       values: HierarchyValues;
+      /** 계산식 구성항목 전체 선택 시 우선 사용할 대학알리미 대학 총계 */
+      officialUniv: YearValueMap;
+      officialYears: number[];
       childLines: {
         metricId: number;
         name: string;
@@ -115,6 +140,8 @@ export interface KpiViewModel {
   depts: Record<string, YearValueMap>;
   yoy: YoySnapshot;
   kpi: MonitoringKpiDef;
+  /** 선택 연도의 대학 전체값 출처 */
+  valueSource: MonitoringValueSource | null;
   /** 재학생 수·가감 계산식: 켠 구성 항목별 학과 값 (비교 누적 차트용) */
   stackBreakdown?: StackBreakdown;
   studentBreakdown?: StudentCountBreakdown;
@@ -184,6 +211,44 @@ function extractHierarchy(
   return { univ: yearMapFrom(univRow), depts };
 }
 
+function yearsWithValues(values: YearValueMap, years: number[]): number[] {
+  return years.filter((year) => values[year] != null);
+}
+
+/** 대학 전체값만 대학알리미 우선. 학과값은 엑셀 업로드 값을 보존한다. */
+function preferOfficialUniversity(
+  monitoring: HierarchyValues,
+  official: HierarchyValues | undefined,
+  years: number[],
+): { values: HierarchyValues; officialYears: number[] } {
+  if (!official) return { values: monitoring, officialYears: [] };
+  const officialYears = yearsWithValues(official.univ, years);
+  const officialSet = new Set(officialYears);
+  return {
+    values: {
+      univ: Object.fromEntries(
+        years.map((year) => [
+          year,
+          officialSet.has(year)
+            ? official.univ[year]
+            : (monitoring.univ[year] ?? null),
+        ]),
+      ),
+      depts: monitoring.depts,
+    },
+    officialYears,
+  };
+}
+
+function valueSourceAt(
+  value: number | null | undefined,
+  officialYears: number[],
+  year: number,
+): MonitoringValueSource | null {
+  if (value == null) return null;
+  return officialYears.includes(year) ? 'ALIMI' : 'MONITORING';
+}
+
 function emptyHierarchy(
   years: number[],
   deptCodes: string[],
@@ -195,14 +260,22 @@ function emptyHierarchy(
 }
 
 export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
-  const [rawYears, metricRes] = await Promise.all([
+  const [rawYears, metricRes, officialRes] = await Promise.all([
     fetchMonitoringYears().catch(() => [] as number[]),
     api.get<CategoryTreeNode[]>('/metrics/tree', {
       params: { sourceType: 'MONITORING' },
     }),
+    // 이 요청이 실패했는데 조용히 직접입력값으로 폴백하면 공시 연결 지표가
+    // 직접입력 지표처럼 보인다. 연결 정보를 못 받으면 화면도 오류로 처리한다.
+    api.get<MonitoringOfficialLinksResponse>(
+      '/metrics/monitoring/official-links',
+    ),
   ]);
 
-  let availableYears = uniqueSortedYears(rawYears).reverse();
+  let availableYears = uniqueSortedYears([
+    ...rawYears,
+    ...(officialRes.data.years ?? []),
+  ]).reverse();
   if (availableYears.length === 0) {
     availableYears = [...fallbackCalendarYears()].reverse();
   }
@@ -219,6 +292,18 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
 
   const visibleTree = excludeHiddenFromTree(metricRes.data);
   const resolved = resolveMonitoringMetrics(visibleTree);
+  const officialLinks = new Map(
+    (officialRes.data.links ?? []).map((link) => [
+      link.monitoringMetricCode,
+      link,
+    ]),
+  );
+  const officialMetricIds = [...officialLinks.values()].map(
+    (link) => link.alimiMetricId,
+  );
+  const requestedMetricIds = [
+    ...new Set([...resolved.allMetricIds, ...officialMetricIds]),
+  ];
   const categoryTitles = resolveCategoryTitles(visibleTree);
   const org = parseOrgTree(treeRes.data);
   if (!org) {
@@ -241,6 +326,11 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
     leave: emptyHierarchy(years, deptCodes),
     deferred: emptyHierarchy(years, deptCodes),
   } as Record<StudentCountComponentKey, HierarchyValues>;
+  const studentOfficialTotal = emptyYearMap(years);
+  let studentOfficialTotalYears: number[] = [];
+  const studentComponentOfficialYears: Partial<
+    Record<StudentCountComponentKey, number[]>
+  > = {};
 
   const directs: MonitoringBundle['directs'] = {};
   const accountings: MonitoringBundle['accountings'] = {};
@@ -272,6 +362,8 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
         formulaLabel: f.formulaLabel,
         node: f.node,
         values: emptyHierarchy(years, deptCodes),
+        officialUniv: emptyYearMap(years),
+        officialYears: [],
         childLines: f.node.children.map((c) => ({
           metricId: c.metricId,
           name: c.name,
@@ -281,7 +373,7 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
     }
   };
 
-  if (resolved.allMetricIds.length === 0) {
+  if (requestedMetricIds.length === 0) {
     for (const d of resolved.directs) {
       directs[d.kpi.id] = {
         kpi: d.kpi,
@@ -289,6 +381,7 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
         unit: d.unit,
         found: false,
         values: emptyHierarchy(years, deptCodes),
+        officialYears: [],
       };
     }
     emptyAccounting();
@@ -301,6 +394,9 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
       sections: resolved.sections,
       directs,
       studentComponents,
+      studentOfficialTotal,
+      studentOfficialTotalYears,
+      studentComponentOfficialYears,
       studentMeta,
       accountings,
       formulas,
@@ -314,26 +410,54 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
 
   const { data: pivot } = await api.post<PivotResult>('/pivot', {
     targets,
-    metricIds: resolved.allMetricIds,
+    metricIds: requestedMetricIds,
     years,
     hierarchyIntegrate: false,
   });
 
   const rows = pivot.rows ?? [];
 
+  const officialHierarchy = (monitoringMetricCode: string) => {
+    const link = officialLinks.get(monitoringMetricCode);
+    return link
+      ? extractHierarchy(
+          rows,
+          [link.alimiMetricId],
+          years,
+          org.univCode,
+          deptCodes,
+        )
+      : undefined;
+  };
+
+  const studentTotalOfficial = officialHierarchy('student-count');
+  if (studentTotalOfficial) {
+    Object.assign(studentOfficialTotal, studentTotalOfficial.univ);
+    studentOfficialTotalYears = yearsWithValues(
+      studentTotalOfficial.univ,
+      years,
+    );
+  }
+
   for (const d of resolved.directs) {
-    directs[d.kpi.id] = {
-      kpi: d.kpi,
-      label: d.label,
-      unit: d.unit,
-      found: d.found,
-      values: extractHierarchy(
+    const preferred = preferOfficialUniversity(
+      extractHierarchy(
         rows,
         d.metricIds,
         years,
         org.univCode,
         deptCodes,
       ),
+      officialHierarchy(d.kpi.metricCode),
+      years,
+    );
+    directs[d.kpi.id] = {
+      kpi: d.kpi,
+      label: d.label,
+      unit: d.unit,
+      found: d.found,
+      values: preferred.values,
+      officialYears: preferred.officialYears,
     };
   }
 
@@ -341,13 +465,19 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
     (Object.keys(resolved.composite.components) as StudentCountComponentKey[]).forEach(
       (key) => {
         const comp = resolved.composite!.components[key];
-        studentComponents[key] = extractHierarchy(
-          rows,
-          comp.metricIds,
+        const preferred = preferOfficialUniversity(
+          extractHierarchy(
+            rows,
+            comp.metricIds,
+            years,
+            org.univCode,
+            deptCodes,
+          ),
+          officialHierarchy(STUDENT_COUNT_COMPONENT_CODES[key]),
           years,
-          org.univCode,
-          deptCodes,
         );
+        studentComponents[key] = preferred.values;
+        studentComponentOfficialYears[key] = preferred.officialYears;
       },
     );
   }
@@ -401,6 +531,7 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
   }
 
   for (const f of resolved.formulas) {
+    const official = officialHierarchy(f.kpi.metricCode);
     formulas[f.kpi.id] = {
       kpi: f.kpi,
       label: f.label,
@@ -409,6 +540,10 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
       formulaLabel: f.formulaLabel,
       node: f.node,
       values: composeFormulaHierarchy(f.node, rawById, years, deptCodes),
+      officialUniv: official?.univ ?? emptyYearMap(years),
+      officialYears: official
+        ? yearsWithValues(official.univ, years)
+        : [],
       childLines: formulaChildHierarchies(f.node, rawById, years, deptCodes),
     };
   }
@@ -421,6 +556,9 @@ export async function fetchMonitoringBundle(): Promise<MonitoringBundle> {
     sections: resolved.sections,
     directs,
     studentComponents,
+    studentOfficialTotal,
+    studentOfficialTotalYears,
+    studentComponentOfficialYears,
     studentMeta,
     accountings,
     formulas,
@@ -437,6 +575,69 @@ export const STUDENT_TOGGLE_IDS: Record<
   deferred: 'includeDeferred',
 };
 
+function preferOfficialStudentTotal(
+  values: HierarchyValues,
+  bundle: MonitoringBundle,
+  toggles: StudentCountToggles,
+  years: number[],
+): HierarchyValues {
+  // 대학알리미 재학생 수는 정원 내·외 합계만 제공한다. 두 항목이 모두
+  // 선택됐을 때만 공시 총계로 바꾸고 학과별 합계는 업로드 값을 유지한다.
+  if (!toggles.includeInner || !toggles.includeOuter) return values;
+
+  const univ = { ...values.univ };
+  for (const year of years) {
+    const officialTotal = bundle.studentOfficialTotal[year];
+    if (officialTotal == null) continue;
+    let total = officialTotal;
+    if (toggles.includeLeave) {
+      total += bundle.studentComponents.leave.univ[year] ?? 0;
+    }
+    if (toggles.includeDeferred) {
+      total += bundle.studentComponents.deferred.univ[year] ?? 0;
+    }
+    univ[year] = total;
+  }
+  return { univ, depts: values.depts };
+}
+
+function studentValueSourceAt(
+  bundle: MonitoringBundle,
+  toggles: StudentCountToggles,
+  selectedYear: number,
+  value: number | null | undefined,
+): MonitoringValueSource | null {
+  if (value == null) return null;
+  let official = false;
+  let monitoring = false;
+
+  if (toggles.includeInner || toggles.includeOuter) {
+    if (
+      toggles.includeInner &&
+      toggles.includeOuter &&
+      bundle.studentOfficialTotalYears.includes(selectedYear)
+    ) {
+      official = true;
+    } else {
+      monitoring = true;
+    }
+  }
+
+  for (const key of ['leave', 'deferred'] as StudentCountComponentKey[]) {
+    if (!toggles[STUDENT_TOGGLE_IDS[key]]) continue;
+    if (bundle.studentComponents[key].univ[selectedYear] == null) continue;
+    if ((bundle.studentComponentOfficialYears[key] ?? []).includes(selectedYear)) {
+      official = true;
+    } else {
+      monitoring = true;
+    }
+  }
+
+  if (official && monitoring) return 'MIXED';
+  if (official) return 'ALIMI';
+  return 'MONITORING';
+}
+
 export function buildKpiViews(
   bundle: MonitoringBundle,
   toggles: StudentCountToggles,
@@ -448,11 +649,16 @@ export function buildKpiViews(
   const deptCodes = allDeptCodes(org);
   const views: KpiViewModel[] = [];
 
-  const studentValues = composeStudentCountHierarchy(
-    bundle.studentComponents,
+  const studentValues = preferOfficialStudentTotal(
+    composeStudentCountHierarchy(
+      bundle.studentComponents,
+      toggles,
+      years,
+      deptCodes,
+    ),
+    bundle,
     toggles,
     years,
-    deptCodes,
   );
   const studentKeys = selectedComponentKeys(toggles);
   if (bundle.studentMeta.found) {
@@ -497,6 +703,12 @@ export function buildKpiViews(
         selectedYear,
       ),
       kpi: bundle.studentMeta.kpi,
+      valueSource: studentValueSourceAt(
+        bundle,
+        toggles,
+        selectedYear,
+        studentValues.univ[selectedYear],
+      ),
       studentBreakdown,
       stackBreakdown,
       componentToggles: (
@@ -529,6 +741,11 @@ export function buildKpiViews(
       depts: entry.values.depts,
       yoy: computeYoy(entry.values.univ, years, entry.kpi.direction, selectedYear),
       kpi: entry.kpi,
+      valueSource: valueSourceAt(
+        entry.values.univ[selectedYear],
+        entry.officialYears,
+        selectedYear,
+      ),
     });
   }
 
@@ -556,6 +773,11 @@ export function buildKpiViews(
       depts: entry.income.depts,
       yoy: computeYoy(entry.income.univ, years, entry.kpi.direction, selectedYear),
       kpi: entry.kpi,
+      valueSource:
+        entry.income.univ[selectedYear] != null ||
+        entry.expense.univ[selectedYear] != null
+          ? 'MONITORING'
+          : null,
       accounting: {
         income: entry.income.univ,
         expense: entry.expense.univ,
@@ -596,7 +818,7 @@ export function buildKpiViews(
       analysis.kind === 'additive'
         ? analysis.terms.filter((t) => kpiToggles[String(t.metricId)] !== false)
         : [];
-    const values =
+    const computedValues =
       analysis.kind === 'additive'
         ? composeAdditiveHierarchy(
             enabledTerms,
@@ -606,6 +828,22 @@ export function buildKpiViews(
             deptCodes,
           )
         : entry.values;
+    const allFormulaTermsEnabled =
+      analysis.kind !== 'additive' ||
+      analysis.terms.every(
+        (term) => kpiToggles[String(term.metricId)] !== false,
+      );
+    const values = allFormulaTermsEnabled
+      ? preferOfficialUniversity(
+          computedValues,
+          {
+            univ: entry.officialUniv,
+            // 공시 대학 총계가 학과값으로 복제돼도 학과 비교에는 사용하지 않는다.
+            depts: {},
+          },
+          years,
+        ).values
+      : computedValues;
 
     const stackBreakdown: StackBreakdown | undefined =
       analysis.kind === 'additive' && enabledTerms.length > 0
@@ -651,6 +889,11 @@ export function buildKpiViews(
       depts: values.depts,
       yoy: computeYoy(values.univ, years, entry.kpi.direction, selectedYear),
       kpi: entry.kpi,
+      valueSource: valueSourceAt(
+        values.univ[selectedYear],
+        allFormulaTermsEnabled ? entry.officialYears : [],
+        selectedYear,
+      ),
       stackBreakdown,
       componentToggles:
         analysis.kind === 'additive'

@@ -18,6 +18,55 @@ export interface MonitoringSeedCategory {
   metrics: MonitoringSeedMetric[];
 }
 
+/**
+ * 모니터링 대학 전체값(_ALL_)에 우선 적용할 대학알리미 지표.
+ *
+ * 대학알리미 비교 API는 대부분 대학 단위 값만 제공한다. 따라서 이 매핑은
+ * 대학 전체 시계열에만 사용하고, 학과별 값은 MONITORING 엑셀 업로드 값을
+ * 그대로 유지한다. 이름이 비슷해도 산식이 다른 지표는 연결하지 않는다.
+ */
+export interface MonitoringAlimiLink {
+  monitoringMetricCode: string;
+  alimiMetricNames: string[];
+}
+
+export const MONITORING_ALIMI_LINKS: MonitoringAlimiLink[] = [
+  { monitoringMetricCode: 'student-count', alimiMetricNames: ['재학생 수'] },
+  {
+    monitoringMetricCode: 'student-count.leave',
+    alimiMetricNames: ['휴학생 현황'],
+  },
+  {
+    monitoringMetricCode: 'foreign-student-count',
+    alimiMetricNames: ['외국인 학생'],
+  },
+  {
+    monitoringMetricCode: 'freshman-fill-inner',
+    alimiMetricNames: ['신입생 충원율'],
+  },
+  {
+    monitoringMetricCode: 'admission-competition',
+    alimiMetricNames: ['신입생 경쟁률'],
+  },
+  {
+    monitoringMetricCode: 'enrolled-fill-all',
+    alimiMetricNames: ['재학생 충원율'],
+  },
+  { monitoringMetricCode: 'dropout-rate', alimiMetricNames: ['중도탈락률'] },
+  {
+    monitoringMetricCode: 'employment-rate',
+    alimiMetricNames: ['졸업생 취업률'],
+  },
+  {
+    monitoringMetricCode: 'faculty-secure-rate',
+    alimiMetricNames: ['전임교원 확보율'],
+  },
+  {
+    monitoringMetricCode: 'students-per-faculty',
+    alimiMetricNames: ['전임교원 1인당 학생수(재학생)'],
+  },
+];
+
 /** 회계 지표(상위 → 수입/지출 → 세부 항목) 코드 규칙: `<회계코드>.income.<항목>` */
 function accountingSeed(
   code: string,

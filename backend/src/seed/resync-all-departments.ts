@@ -7,15 +7,13 @@
  * ALIMI_CALL_DELAY_MS=800
  */
 import 'reflect-metadata';
-import * as dotenv from 'dotenv';
+import '../config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../app.module';
 import { AlimiService } from '../modules/alimi/alimi.service';
 import { IrUpdateLog } from '../entities';
-
-dotenv.config();
 
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, {

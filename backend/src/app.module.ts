@@ -1,3 +1,4 @@
+import { envFilePaths } from './config/load-env';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -20,7 +21,7 @@ import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: envFilePaths }),
     ScheduleModule.forRoot(),
     TypeOrmModule.forRoot(buildTypeOrmOptions()),
     AuthModule,

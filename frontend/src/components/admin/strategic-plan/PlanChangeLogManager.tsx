@@ -17,9 +17,171 @@ import { fetchSpChanges, rollbackSpChange } from '@/lib/strategic-plan/api';
 import { apiMessage } from '@/lib/strategic-plan/apiError';
 import type { SpChangeLog } from '@/lib/strategic-plan/types';
 
-function payloadText(value: Record<string, unknown> | null) {
-  if (!value) return '없음';
-  return JSON.stringify(value, null, 2);
+const FIELD_LABELS: Record<string, string> = {
+  goalId: '발전전략 코드',
+  goalNo: '발전전략 순번',
+  goalName: '명칭',
+  strategyId: '전략과제 코드',
+  strategyName: '명칭',
+  taskCode: '실행과제 코드',
+  taskName: '명칭',
+  subtaskId: 'TASK 식별번호',
+  subtaskCode: 'TASK 코드',
+  subtaskName: 'TASK명',
+  hangulCode: '한글코드',
+  seqNo: '순번',
+  purpose: '추진내용',
+  method: '추진방법',
+  isSpecialized: '특성화 연계',
+  primaryDept: '담당부서',
+  relatedDepts: '연관부서',
+  kpiCode: 'KPI 코드',
+  suffix: '소문자 코드',
+  kpiName: '지표명',
+  unit: '단위',
+  baseline: '기준값',
+  baselineRef: '기준값 참조',
+  formula: '산출식',
+  source: '출처',
+  fundSourceId: '재원 식별번호',
+  fundSourceName: '재원명',
+  displayOrder: '표시 순서',
+  isActive: '사용 여부',
+  effectiveFrom: '적용 시작 학년도',
+  abolishedFrom: '폐지 학년도',
+  snapshotYear: '조회 기준 학년도',
+  scope: '개정 범위',
+  blank: '공란 처리',
+};
+
+const FIELD_ORDER: Record<string, string[]> = {
+  goal: ['goalId', 'goalNo', 'goalName', 'effectiveFrom', 'abolishedFrom'],
+  strategy: [
+    'strategyId',
+    'goalId',
+    'strategyName',
+    'displayOrder',
+    'effectiveFrom',
+    'abolishedFrom',
+  ],
+  task: [
+    'taskCode',
+    'hangulCode',
+    'taskName',
+    'strategyId',
+    'goalId',
+    'isSpecialized',
+    'primaryDept',
+    'relatedDepts',
+    'displayOrder',
+    'effectiveFrom',
+    'abolishedFrom',
+  ],
+  subtask: [
+    'subtaskId',
+    'taskCode',
+    'subtaskCode',
+    'hangulCode',
+    'seqNo',
+    'subtaskName',
+    'purpose',
+    'method',
+    'displayOrder',
+    'effectiveFrom',
+    'abolishedFrom',
+  ],
+  kpi: [
+    'kpiCode',
+    'suffix',
+    'kpiName',
+    'unit',
+    'taskCode',
+    'strategyId',
+    'goalId',
+    'primaryDept',
+    'baseline',
+    'baselineRef',
+    'formula',
+    'source',
+    'displayOrder',
+    'effectiveFrom',
+    'abolishedFrom',
+  ],
+  fund: [
+    'fundSourceId',
+    'fundSourceName',
+    'displayOrder',
+    'isActive',
+    'effectiveFrom',
+    'abolishedFrom',
+  ],
+};
+
+const YEAR_FIELDS = new Set([
+  'effectiveFrom',
+  'abolishedFrom',
+  'snapshotYear',
+]);
+
+function formatPayloadValue(key: string, value: unknown): string {
+  if (value == null || value === '') return '없음';
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.map(String).join(', ') : '없음';
+  }
+  if (key === 'isSpecialized') return value ? '예' : '아니오';
+  if (key === 'isActive') return value ? '사용' : '미사용';
+  if (key === 'blank') return value ? '예' : '아니오';
+  if (key === 'scope') {
+    if (value === 'structure') return '전략체계';
+    if (value === 'kpi') return 'KPI';
+    if (value === 'fund') return '재원 유형';
+  }
+  if (YEAR_FIELDS.has(key)) return `${String(value)}학년도`;
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function payloadEntries(kind: string, value: Record<string, unknown>) {
+  const order = FIELD_ORDER[kind] ?? [];
+  const orderIndex = new Map(order.map((key, index) => [key, index]));
+
+  return Object.entries(value).sort(([left], [right]) => {
+    const leftIndex = orderIndex.get(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightIndex = orderIndex.get(right) ?? Number.MAX_SAFE_INTEGER;
+    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+    return left.localeCompare(right);
+  });
+}
+
+function PayloadDetails({
+  kind,
+  value,
+}: {
+  kind: string;
+  value: Record<string, unknown> | null;
+}) {
+  if (!value) {
+    return (
+      <p className="rounded-md border bg-muted/20 px-3 py-2 text-muted-foreground">
+        없음
+      </p>
+    );
+  }
+
+  return (
+    <dl className="max-h-56 divide-y overflow-y-auto rounded-md border bg-muted/20">
+      {payloadEntries(kind, value).map(([key, fieldValue]) => (
+        <div key={key} className="grid gap-1 px-3 py-2 sm:grid-cols-[13rem_1fr]">
+          <dt className="font-bold text-foreground">
+            {FIELD_LABELS[key] ?? '기타'}({key}):
+          </dt>
+          <dd className="whitespace-pre-wrap break-words text-foreground">
+            {formatPayloadValue(key, fieldValue)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 export function PlanChangeLogManager({
@@ -124,15 +286,11 @@ export function PlanChangeLogManager({
             <div className="grid gap-3 text-xs">
               <div>
                 <p className="mb-1 font-bold">변경 전</p>
-                <pre className="max-h-48 overflow-auto rounded-md border bg-muted/40 p-2">
-                  {payloadText(open.beforePayload)}
-                </pre>
+                <PayloadDetails kind={open.kind} value={open.beforePayload} />
               </div>
               <div>
                 <p className="mb-1 font-bold">변경 후</p>
-                <pre className="max-h-48 overflow-auto rounded-md border bg-muted/40 p-2">
-                  {payloadText(open.afterPayload)}
-                </pre>
+                <PayloadDetails kind={open.kind} value={open.afterPayload} />
               </div>
             </div>
           )}

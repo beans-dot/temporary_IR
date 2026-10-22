@@ -18,8 +18,10 @@ import type {
   StudentCountComponentKey,
   StudentCountToggles,
 } from '@/lib/monitoring/types';
+import { useAuthStore } from '@/store/useAuthStore';
 
 export function MonitoringDashboard() {
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin');
   const [bundle, setBundle] = useState<MonitoringBundle | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,7 +135,14 @@ export function MonitoringDashboard() {
             />
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            카드를 누르면 아래 상세 조회 영역에서 추이와 하위 위계 비교를 봅니다.
+            {isAdmin ? (
+              <>
+                대학 전체값은 대학알리미 정보공시를 우선하며, 공시가 없거나
+                학과별 값이 필요한 경우 모니터링 엑셀 입력값을 사용합니다.{' '}
+              </>
+            ) : null}
+            카드를 누르면 아래 상세 조회 영역에서 추이와 하위 위계 비교를
+            봅니다.
           </p>
         </header>
         <div className="space-y-10">
@@ -149,6 +158,7 @@ export function MonitoringDashboard() {
                 title={bundle?.categoryTitles[category.id]}
                 views={categoryViews}
                 selectedId={selectedId}
+                showValueSource={isAdmin}
                 onSelect={onSelect}
                 onComponentToggle={onComponentToggle}
               />

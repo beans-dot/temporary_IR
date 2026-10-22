@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
   images: {
     // 로컬 /logo.png 사용. 외부 도메인 필요 시 여기에 추가.
     remotePatterns: [],

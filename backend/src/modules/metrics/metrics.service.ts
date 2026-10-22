@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Not, Repository } from 'typeorm';
+import { In, IsNull, Not, Repository } from 'typeorm';
 import {
   IrMetricCategory,
   IrMetricRegistry,
@@ -24,6 +24,7 @@ import {
 } from './metric-labels';
 import { coerceMetricSourceType, sourceTypeLabel } from './metric-source';
 import {
+  MONITORING_ALIMI_LINKS,
   MONITORING_SEED_CATALOG,
   type MonitoringSeedCategory,
   type MonitoringSeedMetric,
@@ -62,13 +63,13 @@ export class MetricsService {
     private readonly categoryRepo: Repository<IrMetricCategory>,
     @InjectRepository(IrMetricRegistry)
     private readonly metricRepo: Repository<IrMetricRegistry>,
+    @InjectRepository(IrRawData)
+    private readonly rawRepo: Repository<IrRawData>,
   ) {}
 
   private domainReady = false;
 
-  /**
-   * 엑셀 업로드 대기용 「분류없음」 카테고리를 출처별로 보장하고 최상단(displayOrder=-1)으로 유지.
-   */
+  /** 레거시 미분류 지표용 「분류없음」 카테고리를 출처별로 보장한다. */
   async ensureUncategorizedCategory(
     sourceType: MetricSourceType = 'ALIMI',
   ): Promise<IrMetricCategory> {
@@ -184,20 +185,95 @@ export class MetricsService {
     );
   }
 
-  /** 모니터링 지표에 실제 값이 있는 연도 (내림차순) */
+  /**
+   * 모니터링 화면에서 조회할 수 있는 연도 (내림차순).
+   * 직접 업로드한 MONITORING 값뿐 아니라, 대학 전체값에 자동 연결된
+   * 대학알리미 지표의 보유 연도도 포함한다.
+   */
   async listMonitoringYears(): Promise<number[]> {
+    const [rows, official] = await Promise.all([
+      this.metricRepo.manager
+        .createQueryBuilder(IrRawData, 'r')
+        .innerJoin('r.metric', 'm')
+        .select('r.year', 'year')
+        .distinct(true)
+        .where('m.sourceType = :sourceType', { sourceType: 'MONITORING' })
+        .orderBy('r.year', 'DESC')
+        .getRawMany<{ year: string | number }>(),
+      this.getMonitoringOfficialLinks(),
+    ]);
+
+    return [
+      ...new Set([
+        ...rows.map((row) => Number(row.year)),
+        ...official.years,
+      ]),
+    ]
+      .filter((year) => Number.isFinite(year))
+      .sort((a, b) => b - a);
+  }
+
+  /**
+   * 모니터링 KPI와 대학알리미 대학 전체값의 연결 정보.
+   * 프런트는 이 지표들을 같은 피벗 요청에 포함한 뒤 대학값만 공시 우선으로
+   * 합성한다. 학과값에는 절대 대학 전체값을 복제하지 않는다.
+   */
+  async getMonitoringOfficialLinks(): Promise<{
+    years: number[];
+    links: Array<{
+      monitoringMetricCode: string;
+      alimiMetricId: number;
+      alimiMetricName: string;
+    }>;
+  }> {
+    await this.ensureMetricDomains();
+
+    const names = [
+      ...new Set(MONITORING_ALIMI_LINKS.flatMap((link) => link.alimiMetricNames)),
+    ];
+    const metrics = names.length
+      ? await this.metricRepo.find({
+          where: {
+            sourceType: 'ALIMI',
+            metricName: In(names),
+          },
+        })
+      : [];
+    const byName = new Map(metrics.map((metric) => [metric.metricName, metric]));
+
+    const links = MONITORING_ALIMI_LINKS.flatMap((link) => {
+      const metric = link.alimiMetricNames
+        .map((name) => byName.get(name))
+        .find((candidate) => !!candidate);
+      return metric
+        ? [
+            {
+              monitoringMetricCode: link.monitoringMetricCode,
+              alimiMetricId: metric.metricId,
+              alimiMetricName: metric.metricName,
+            },
+          ]
+        : [];
+    });
+
+    if (links.length === 0) return { years: [], links: [] };
+
     const rows = await this.metricRepo.manager
       .createQueryBuilder(IrRawData, 'r')
-      .innerJoin('r.metric', 'm')
       .select('r.year', 'year')
       .distinct(true)
-      .where('m.sourceType = :sourceType', { sourceType: 'MONITORING' })
+      .where('r.metricId IN (:...metricIds)', {
+        metricIds: links.map((link) => link.alimiMetricId),
+      })
       .orderBy('r.year', 'DESC')
       .getRawMany<{ year: string | number }>();
 
-    return rows
-      .map((row) => Number(row.year))
-      .filter((y) => Number.isFinite(y));
+    return {
+      years: rows
+        .map((row) => Number(row.year))
+        .filter((year) => Number.isFinite(year)),
+      links,
+    };
   }
 
   /**
@@ -553,6 +629,14 @@ export class MetricsService {
       metricUnit: string | null;
       parentMetricId: number | null;
       parentMetricName: string | null;
+      /** 기존 원시데이터에 대학 전체(_ALL_) 값이 있는지 */
+      hasUniversityData: boolean;
+      /** 기존 원시데이터에 학과 값이 있는지 */
+      hasDepartmentData: boolean;
+      /** 대학 전체값(_ALL_)을 대학알리미 값으로 우선 대체하는 지표 */
+      officialAllLinked: boolean;
+      /** 자동연결에 사용하는 대학알리미 지표명 */
+      officialMetricName: string | null;
     }>;
   }> {
     await this.ensureMetricDomains();
@@ -569,12 +653,49 @@ export class MetricsService {
     const metrics = includeHidden
       ? all
       : all.filter((m) => !m.isHidden && !m.category?.isHidden);
+    const officialByMonitoringCode = new Map(
+      MONITORING_ALIMI_LINKS.map((link) => [
+        link.monitoringMetricCode,
+        link.alimiMetricNames[0] ?? null,
+      ]),
+    );
+    const scopeRows: Array<{
+      metricId: string;
+      hasUniversityData: string;
+      hasDepartmentData: string;
+    }> = await this.rawRepo
+      .createQueryBuilder('raw')
+      .select('raw.metric_id', 'metricId')
+      .addSelect(
+        `MAX(CASE WHEN raw.dept_code = '_ALL_' THEN 1 ELSE 0 END)`,
+        'hasUniversityData',
+      )
+      .addSelect(
+        `MAX(CASE WHEN raw.dept_code <> '_ALL_' THEN 1 ELSE 0 END)`,
+        'hasDepartmentData',
+      )
+      .groupBy('raw.metric_id')
+      .getRawMany();
+    const scopesByMetricId = new Map(
+      scopeRows.map((row) => [
+        Number(row.metricId),
+        {
+          hasUniversityData: Number(row.hasUniversityData) === 1,
+          hasDepartmentData: Number(row.hasDepartmentData) === 1,
+        },
+      ]),
+    );
 
     return {
       generatedAt: new Date().toISOString(),
       metrics: metrics.map((m) => {
         const parent =
           m.parentMetricId != null ? byId.get(m.parentMetricId) : undefined;
+        const officialMetricName =
+          m.sourceType === 'MONITORING' && m.metricCode
+            ? (officialByMonitoringCode.get(m.metricCode) ?? null)
+            : null;
+        const scopes = scopesByMetricId.get(m.metricId);
         return {
           metricId: m.metricId,
           metricCode: m.metricCode ?? null,
@@ -585,6 +706,10 @@ export class MetricsService {
           metricUnit: m.metricUnit,
           parentMetricId: m.parentMetricId ?? null,
           parentMetricName: parent?.metricName ?? null,
+          hasUniversityData: scopes?.hasUniversityData ?? false,
+          hasDepartmentData: scopes?.hasDepartmentData ?? false,
+          officialAllLinked: officialMetricName != null,
+          officialMetricName,
         };
       }),
     };

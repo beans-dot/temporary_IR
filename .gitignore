@@ -11,9 +11,6 @@
 **/.env
 **/.env.local
 
-# postgres bind-mount 데이터
-/data
-
 # logs & misc
 *.log
 .DS_Store

@@ -7,7 +7,8 @@ import type {
 
 export const DEFAULT_STUDENT_COUNT_TOGGLES: StudentCountToggles = {
   includeInner: true,
-  includeOuter: false,
+  // 대학 전체 기본값은 대학알리미의 재학생 총계(정원 내+외)와 맞춘다.
+  includeOuter: true,
   includeLeave: false,
   includeDeferred: false,
 };

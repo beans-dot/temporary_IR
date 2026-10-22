@@ -5,15 +5,13 @@
  * 기본: 연성대(YSU) 2023~2025. ALIMI_REPAIR_UNIV_CODES=코드1,코드2 로 확장 가능.
  */
 import 'reflect-metadata';
-import * as dotenv from 'dotenv';
+import '../config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../app.module';
 import { IrUpdateLog } from '../entities';
 import { AlimiService } from '../modules/alimi/alimi.service';
-
-dotenv.config();
 
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, {

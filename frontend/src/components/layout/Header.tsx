@@ -66,9 +66,16 @@ export function Header() {
               priority
             />
           </div>
-          <span className="font-emphasis truncate text-[1.05rem] text-foreground sm:text-[1.2rem]">
-            YSU IR Library
-          </span>
+          <div className="relative h-[20px] w-[122px] min-w-0 shrink sm:h-[24px] sm:w-[145px] sm:shrink-0">
+            <Image
+              src="/ysu-ir-library-wordmark.png"
+              alt="YSU IR Library"
+              fill
+              sizes="(max-width: 640px) 122px, 145px"
+              style={{ objectFit: 'contain', objectPosition: 'left center' }}
+              priority
+            />
+          </div>
         </Link>
 
         {hydrated && user && (

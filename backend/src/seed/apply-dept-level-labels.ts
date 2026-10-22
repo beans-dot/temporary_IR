@@ -5,15 +5,13 @@
  * 정기 배치·엑셀 업로드 시에도 동일 로직이 실행되며, 기존 데이터 보수용.
  */
 import 'reflect-metadata';
-import * as dotenv from 'dotenv';
+import '../config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../app.module';
 import { IrUpdateLog } from '../entities';
 import { syncDeptLevelMetricNames } from '../modules/metrics/metric-labels';
-
-dotenv.config();
 
 async function main() {
   const app = await NestFactory.createApplicationContext(AppModule, {

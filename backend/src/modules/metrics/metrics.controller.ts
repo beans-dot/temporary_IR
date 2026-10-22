@@ -36,10 +36,16 @@ export class MetricsController {
     );
   }
 
-  /** 모니터링 원본 데이터가 존재하는 연도 (조회 년도 선택용) */
+  /** 모니터링 입력값 또는 자동연결 정보공시값이 존재하는 연도 */
   @Get('monitoring/years')
   listMonitoringYears() {
     return this.metricsService.listMonitoringYears();
+  }
+
+  /** 대학 전체값에 사용할 대학알리미 지표 매핑과 가용 연도 */
+  @Get('monitoring/official-links')
+  getMonitoringOfficialLinks() {
+    return this.metricsService.getMonitoringOfficialLinks();
   }
 
   @Get('categories')

@@ -9,6 +9,7 @@ export function CategorySection({
   title,
   views,
   selectedId,
+  showValueSource,
   onSelect,
   onComponentToggle,
 }: {
@@ -17,6 +18,7 @@ export function CategorySection({
   title?: string;
   views: KpiViewModel[];
   selectedId: string | null;
+  showValueSource: boolean;
   onSelect: (id: KpiViewModel['id']) => void;
   onComponentToggle: (kpiId: string, itemId: string, on: boolean) => void;
 }) {
@@ -32,6 +34,7 @@ export function CategorySection({
             key={view.id}
             view={view}
             selected={selectedId === view.id}
+            showValueSource={showValueSource}
             onSelect={() => onSelect(view.id)}
             onComponentToggle={(itemId, on) =>
               onComponentToggle(view.id, itemId, on)

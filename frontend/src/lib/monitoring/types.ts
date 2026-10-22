@@ -1,5 +1,8 @@
 export type MetricDirection = 'higher-better' | 'lower-better';
 
+/** 카드의 선택 연도 대학 전체값 출처 */
+export type MonitoringValueSource = 'ALIMI' | 'MONITORING' | 'MIXED';
+
 export type SeriesAggregation = 'sum' | 'avg';
 
 /** 시드 KPI id 또는 지표 DB 빌더에서 추가한 지표의 동적 id */

@@ -281,6 +281,10 @@ export function resolveMonitoringMetrics(tree: CategoryTreeNode[]): {
     const kpiIds: string[] = [];
 
     for (const root of cat.metrics ?? []) {
+      // 대학알리미 API에서 정원 내 값을 별도로 제공하지 않아 현재 화면에서는
+      // 노출하지 않는다. DB 지표와 업로드 값은 그대로 보존한다.
+      if (root.metricCode === 'enrolled-fill-inner') continue;
+
       const catalogKpi = root.metricCode
         ? MONITORING_KPI_MAP[root.metricCode]
         : undefined;

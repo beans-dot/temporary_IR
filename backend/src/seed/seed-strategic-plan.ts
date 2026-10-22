@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as dotenv from 'dotenv';
+import '../config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -22,8 +22,6 @@ import {
   type SpComparePayload,
 } from '../entities';
 import { SP_DEFAULT_FUND_SOURCES } from '../modules/strategic-plan/strategic-plan.constants';
-
-dotenv.config();
 
 interface PlanFile {
   plan: {

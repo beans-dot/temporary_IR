@@ -18,11 +18,13 @@ function formatDelta(delta: number | null, unit: string | null): string {
 export function MetricOverviewCard({
   view,
   selected,
+  showValueSource,
   onSelect,
   onComponentToggle,
 }: {
   view: KpiViewModel;
   selected: boolean;
+  showValueSource: boolean;
   onSelect: () => void;
   onComponentToggle?: (itemId: string, on: boolean) => void;
 }) {
@@ -55,6 +57,15 @@ export function MetricOverviewCard({
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-sm leading-snug">{view.label}</CardTitle>
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
+            {showValueSource ? (
+              view.valueSource === 'ALIMI' ? (
+                <Badge variant="alimi">대학값: 정보공시</Badge>
+              ) : view.valueSource === 'MIXED' ? (
+                <Badge variant="monitoring">대학값: 공시+입력</Badge>
+              ) : view.valueSource === 'MONITORING' ? (
+                <Badge variant="monitoring">대학값: 직접입력</Badge>
+              ) : null
+            ) : null}
             {!view.found ? (
               <Badge variant="secondary">미등록</Badge>
             ) : !view.hasHierarchy ? (

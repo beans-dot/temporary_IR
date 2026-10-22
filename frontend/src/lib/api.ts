@@ -200,6 +200,14 @@ export interface MetricCodebookEntry {
   metricUnit: string | null;
   parentMetricId?: number | null;
   parentMetricName?: string | null;
+  /** 기존 값에 대학 전체(_ALL_) 데이터가 있는지 */
+  hasUniversityData?: boolean;
+  /** 기존 값에 학과 데이터가 있는지 */
+  hasDepartmentData?: boolean;
+  /** 대학 전체값(_ALL_)이 대학알리미 정보공시와 자동 연결되는지 */
+  officialAllLinked?: boolean;
+  /** 자동 연결된 대학알리미 지표명 */
+  officialMetricName?: string | null;
 }
 
 export interface MetricCodebook {
