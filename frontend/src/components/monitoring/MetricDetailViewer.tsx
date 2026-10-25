@@ -43,7 +43,7 @@ export function MetricDetailViewer({
         <h4 className="text-base font-bold">1. 추이 그래프</h4>
         <p className="text-sm text-muted-foreground">
           {view.accounting
-            ? `대학 예산은 수입과 지출을 따로 봅니다. 그래프는 ${view.selectedYear - 2}~${view.selectedYear}년 수입·지출 추이입니다.`
+            ? `회계 자료는 조회 연도의 직전 연도 결산입니다. 그래프는 ${view.selectedYear - 2}~${view.selectedYear}년 수입·지출 추이입니다.`
             : `${view.selectedYear}년 기준 직전 2년을 포함한 3개년 추이입니다.`}
           {view.studentBreakdown || view.stackBreakdown
             ? ' 추이는 위에서 켠 구성 항목의 합(총계)으로 그립니다.'

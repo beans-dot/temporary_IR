@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsObject,
@@ -691,4 +692,44 @@ export class UpdateVisionDto {
   @ValidateNested()
   @Type(() => Talent3cDto)
   talent3c?: Talent3cDto | null;
+}
+
+/**
+ * 사업프로그램·지표 JSON을 기존 값과 어떻게 합칠지.
+ * keep: 같은 세부TASK·지표는 유지하고 없는 항목만 추가
+ * overwrite: 같은 세부TASK·지표는 파일로 덮고, 파일에 없는 기존 항목은 유지
+ * sync: 파일에 있는 실행과제의 해당 JSON을 파일 내용과 같게 맞춤
+ */
+export const SP_SEED_JSON_MODES = ['keep', 'overwrite', 'sync'] as const;
+export type SpSeedJsonMode = (typeof SP_SEED_JSON_MODES)[number];
+
+/** 중장기 예결산·자체평가 보고서 임시 시딩. strategies 안쪽은 추출 JSON 그대로 둔다. */
+export class ImportSeedSnapshotDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(SP_MIN_YEAR)
+  @Max(SP_MAX_YEAR)
+  year?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  dryRun?: boolean;
+
+  /** 파일에 없는 세부TASK의 초기시딩 합계를 이 연도에서 지운다. */
+  @IsOptional()
+  @IsBoolean()
+  replaceMissing?: boolean;
+
+  /**
+   * 파일에 있는 실행과제의 사업프로그램·지표 JSON을 기존 값과 어떻게 합칠지.
+   * 없으면 overwrite.
+   */
+  @IsOptional()
+  @IsIn(SP_SEED_JSON_MODES)
+  jsonMode?: SpSeedJsonMode;
+
+  @IsArray()
+  @ArrayMaxSize(40)
+  strategies: unknown[];
 }

@@ -431,10 +431,11 @@ export class StrategicPlanService implements OnModuleInit {
         strategyId:
           (payload?.strategyId as string | null | undefined) ?? row.strategyId,
         goalId: (payload?.goalId as string | null | undefined) ?? row.goalId,
-        primaryDept:
+        primaryDept: officeName(
           payload?.primaryDept === undefined
             ? row.primaryDept
             : (payload.primaryDept as string | null),
+        ),
         baseline:
           payload?.baseline === undefined
             ? row.baseline

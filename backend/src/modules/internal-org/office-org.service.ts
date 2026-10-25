@@ -333,6 +333,75 @@ export class OfficeOrgService {
     return saved;
   }
 
+  /**
+   * 그 학년도에 없는 행정부서를 만들거나, 이미 있는 부서의 적용 구간을 그 해까지 연다.
+   * 중장기발전계획 관리·조직 변경이력이 같은 학년도 기록을 쓰도록 신설·수정 이력을 남긴다.
+   */
+  async ensureOffice(
+    deptName: string,
+    year: number,
+    userId?: string,
+  ): Promise<string> {
+    await this.ensureMigrated();
+    this.versioning.assertYear(year);
+    const name = deptName.trim();
+    if (!name) throw new BadRequestException('부서 이름을 입력해 주세요.');
+    const rows = await this.officeRepo.find();
+    const found =
+      rows.find((row) => !row.isCategory && row.officeCode === name) ??
+      rows.find((row) => !row.isCategory && row.deptName === name);
+    if (found?.officeCode) {
+      await this.coverOfficeYear(found, year, userId);
+      return found.officeCode;
+    }
+    const created = await this.createOffice(
+      { deptName: name, year, isCategory: false },
+      userId,
+    );
+    if (!created.officeCode) {
+      throw new BadRequestException(`부서 코드를 만들지 못했습니다: ${name}`);
+    }
+    return created.officeCode;
+  }
+
+  private async coverOfficeYear(
+    row: IrSpDepartment,
+    year: number,
+    userId?: string,
+  ) {
+    if (activeAt(row.effectiveFrom, row.abolishedFrom, year)) return;
+    const before = this.payload(row);
+    if (row.effectiveFrom > year) row.effectiveFrom = year;
+    if (row.abolishedFrom != null && row.abolishedFrom <= year) {
+      row.abolishedFrom = null;
+    }
+    await this.officeRepo.save(row);
+    const after = this.payload(row);
+    await this.versioning.writeVersion({
+      kind: 'office',
+      lineageId: String(row.deptId),
+      alphaCode: row.officeCode ?? '',
+      displayName: row.deptName,
+      year,
+      changeType: 'update',
+      payload: after,
+      previousPayload: before,
+      userId,
+    });
+    await this.versioning.recordChange({
+      year,
+      kind: 'office',
+      lineageId: String(row.deptId),
+      displayName: row.deptName,
+      changeType: 'update',
+      summary: `${row.deptName}를 ${year}학년도부터 사용`,
+      before,
+      after,
+      userId,
+    });
+    await this.annualSync.sync(year);
+  }
+
   async updateOffice(
     deptId: number,
     input: {

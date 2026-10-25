@@ -76,18 +76,23 @@ export function MetricOverviewCard({
       </CardHeader>
       <CardContent className="space-y-3 p-4 pt-0">
         {view.accounting ? (
-          <div className="grid grid-cols-2 gap-3">
-            <AccountingHeadline
-              title="수입"
-              yoy={view.accounting.incomeYoy}
-              unit={view.unit}
-            />
-            <AccountingHeadline
-              title="지출"
-              yoy={view.accounting.expenseYoy}
-              unit={view.unit}
-            />
-          </div>
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <AccountingHeadline
+                title="수입"
+                yoy={view.accounting.incomeYoy}
+                unit={view.unit}
+              />
+              <AccountingHeadline
+                title="지출"
+                yoy={view.accounting.expenseYoy}
+                unit={view.unit}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              조회 연도의 직전 연도 결산
+            </p>
+          </>
         ) : (
           <>
             <div>

@@ -1,6 +1,36 @@
 import type { HierarchyValues, YearValueMap } from './types';
 import { emptyYearMap, sumYearMaps } from './composeStudentCount';
 
+/**
+ * 모니터링에 조회 연도로 올라온 회계는 그 직전 연도 결산이다.
+ * 조회 연도 2026 행의 금액은 2025년 회계로 보여 준다.
+ */
+export const ACCOUNTING_YEAR_LAG = 1;
+
+export function projectAccountingYearMap(
+  stored: YearValueMap,
+  displayYears: number[],
+  lag = ACCOUNTING_YEAR_LAG,
+): YearValueMap {
+  const out = emptyYearMap(displayYears);
+  for (const year of displayYears) {
+    out[year] = stored[year + lag] ?? null;
+  }
+  return out;
+}
+
+export function projectAccountingDeptMaps(
+  stored: Record<string, YearValueMap>,
+  displayYears: number[],
+  lag = ACCOUNTING_YEAR_LAG,
+): Record<string, YearValueMap> {
+  const out: Record<string, YearValueMap> = {};
+  for (const [code, map] of Object.entries(stored)) {
+    out[code] = projectAccountingYearMap(map, displayYears, lag);
+  }
+  return out;
+}
+
 export function subtractYearMaps(
   left: YearValueMap,
   right: YearValueMap,

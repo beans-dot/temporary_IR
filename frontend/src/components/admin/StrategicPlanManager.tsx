@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { NativeSelect } from '@/components/strategic-plan/ui';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { notifyAutoSaved } from '@/components/admin/AutoSaveToast';
 import {
@@ -23,11 +25,13 @@ export function StrategicPlanManager() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState('structure');
   const [viewYear, setViewYear] = useState<number | null>(null);
+  const [structureYear, setStructureYear] = useState<number | null>(null);
   const [revisions, setRevisions] = useState<SpFullRevision[]>([]);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async (asOfYear?: number | null) => {
-    const year = asOfYear === undefined ? viewYear : asOfYear;
+    const year =
+      asOfYear === undefined ? (viewYear ?? structureYear) : asOfYear;
     try {
       const nextTree = await fetchSpTree(year ?? undefined);
       setTree(nextTree);
@@ -39,7 +43,7 @@ export function StrategicPlanManager() {
     } finally {
       setLoading(false);
     }
-  }, [viewYear]);
+  }, [viewYear, structureYear]);
 
   const loadRevisions = useCallback(() => {
     fetchSpFullRevisions()
@@ -111,14 +115,44 @@ export function StrategicPlanManager() {
       <div>
         <h2 className="text-lg font-bold">중장기발전계획</h2>
         <p className="text-sm text-muted-foreground">
-          최신 전략체계를 관리합니다. 과거 내용은 변경이력과 성과관리 연도 조회로
-          확인합니다.
+          최신 전략체계를 관리합니다. 학년도를 고르면 그 해 변경이력이 반영된
+          이름과 담당부서를 봅니다.
         </p>
       </div>
+      {tab !== 'changes' && tab !== 'funds' && (
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="sp-structure-year">조회 학년도</Label>
+            <NativeSelect
+              id="sp-structure-year"
+              value={structureYear == null ? '' : String(structureYear)}
+              onChange={(e) => {
+                const next = e.target.value ? Number(e.target.value) : null;
+                setViewYear(null);
+                setStructureYear(next);
+                setLoading(true);
+              }}
+            >
+              <option value="">최신</option>
+              {tree.years.map((year) => (
+                <option key={year} value={String(year)}>
+                  {year}학년도
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+        </div>
+      )}
       {viewingSnapshot && (
         <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
           {viewYear}학년도 전면개정 시점을 조회 중입니다. 이 화면은 조회 전용이며
           수정할 수 없습니다.
+        </div>
+      )}
+      {!viewingSnapshot && structureYear != null && (
+        <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          {structureYear}학년도 변경이력이 반영된 전략체계와 KPI입니다. 이름과
+          담당부서는 그 해 기준으로 보이고, 수정은 최신 화면에서 합니다.
         </div>
       )}
       <Tabs value={tab} onValueChange={setTab}>
@@ -147,7 +181,7 @@ export function StrategicPlanManager() {
           <PlanStructureManager
             tree={tree}
             reload={() => reload()}
-            readOnly={viewingSnapshot}
+            readOnly={viewingSnapshot || structureYear != null}
           />
         </TabsContent>
 
@@ -155,14 +189,14 @@ export function StrategicPlanManager() {
           <PlanKpiManager
             tree={tree}
             reload={() => reload()}
-            readOnly={viewingSnapshot}
+            readOnly={viewingSnapshot || structureYear != null}
           />
         </TabsContent>
 
         <TabsContent value="funds">
           <PlanFundSourceManager
-            asOfYear={viewYear}
-            readOnly={viewingSnapshot}
+            asOfYear={viewYear ?? structureYear}
+            readOnly={viewingSnapshot || structureYear != null}
           />
         </TabsContent>
 

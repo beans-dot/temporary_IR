@@ -290,6 +290,87 @@ export class SpStructureService {
     return hit?.payload ?? null;
   }
 
+  /**
+   * 선택한 학년도 화면에만 payload를 얹는다. live 행과 다른 연도는 그대로 둔다.
+   * 중간 개정처럼 한 해의 이름·책임부서만 다를 때 쓴다.
+   */
+  async pinYearPayload(input: {
+    kind: SpNodeKind;
+    lineageId: string;
+    displayCode: string;
+    year: number;
+    live: Record<string, unknown>;
+    patch: Record<string, unknown>;
+    userId: string;
+  }) {
+    this.assertYear(input.year);
+    const rows = await this.versionRepo.find({
+      where: { kind: input.kind, lineageId: input.lineageId },
+      order: { effectiveFrom: 'DESC', versionId: 'DESC' },
+    });
+    const covering = rows.find((row) =>
+      versionCovers(row.effectiveFrom, row.effectiveTo, input.year),
+    );
+    const before = covering?.payload ?? input.live;
+    const exact = rows.find(
+      (row) => row.effectiveFrom === input.year && row.effectiveTo === input.year,
+    );
+    const after = { ...(exact?.payload ?? before), ...input.patch };
+    const saveSlice = (
+      from: number,
+      to: number | null,
+      payload: Record<string, unknown>,
+    ) =>
+      this.versionRepo.save(
+        this.versionRepo.create({
+          kind: input.kind,
+          lineageId: input.lineageId,
+          alphaCode: input.lineageId,
+          displayCode: input.displayCode,
+          effectiveFrom: from,
+          effectiveTo: to,
+          payload,
+          changeType: 'update',
+          changedBy: input.userId,
+        }),
+      );
+    if (rows.length === 0) {
+      // 버전 이력이 생기면 그 구간만 활성으로 본다. 시딩 연도 앞뒤를 live 문구로 채워
+      // 다른 연도가 화면에서 빠지지 않게 한다.
+      const liveFrom = Number(input.live.effectiveFrom ?? SP_MIN_YEAR);
+      const liveAbolished =
+        input.live.abolishedFrom == null ? null : Number(input.live.abolishedFrom);
+      if (input.year - 1 >= liveFrom) {
+        await saveSlice(liveFrom, input.year - 1, input.live);
+      }
+      await saveSlice(input.year, input.year, after);
+      const afterFrom = input.year + 1;
+      const afterTo = liveAbolished == null ? null : liveAbolished - 1;
+      if (afterTo == null || afterTo >= afterFrom) {
+        await saveSlice(afterFrom, afterTo, input.live);
+      }
+    } else if (exact) {
+      exact.payload = after;
+      exact.displayCode = input.displayCode;
+      exact.changeType = 'update';
+      exact.changedBy = input.userId;
+      await this.versionRepo.save(exact);
+    } else {
+      await saveSlice(input.year, input.year, after);
+    }
+    await this.recordChange({
+      year: input.year,
+      kind: input.kind,
+      lineageId: input.lineageId,
+      displayCode: input.displayCode,
+      changeType: 'update',
+      summary: `${input.displayCode} 수정`,
+      before,
+      after,
+      userId: input.userId,
+    });
+  }
+
   async recordChange(input: {
     year: number;
     kind: SpNodeKind;

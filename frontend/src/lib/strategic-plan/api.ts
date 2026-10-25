@@ -385,3 +385,74 @@ export async function replaceSpCompare(payload: SpCompare) {
   const { data } = await api.put<SpCompare>('/strategic-plan/compare', payload);
   return data;
 }
+
+export interface SpSeedImportIssue {
+  kind: 'miss' | 'warn';
+  code: string;
+  message: string;
+}
+
+/** 사업프로그램·지표 JSON을 기존 값과 합치는 방식. */
+export type SpSeedJsonMode = 'keep' | 'overwrite' | 'sync';
+
+export interface SpSeedImportResult {
+  dryRun: boolean;
+  year: number;
+  fundSourceName: string;
+  fundSourceCreated: boolean;
+  replaceMissing: boolean;
+  jsonMode: SpSeedJsonMode;
+  blocked: boolean;
+  budget: {
+    matched: number;
+    unmatched: number;
+    budgetThousand: number;
+    executedThousand: number;
+    budgetWon: number;
+    executedWon: number;
+    existingRows: number;
+    replace: boolean;
+    namedRows: number;
+  };
+  indicators: {
+    matched: number;
+    unmatched: number;
+    rateMismatch: number;
+    averageRate: number | null;
+  };
+  reports: {
+    matched: number;
+    unmatched: number;
+    activities: number;
+    kpiNotes: number;
+    sections: number;
+    existingJson: number;
+  };
+  usesSeedFund: boolean;
+  textRevisions: number;
+  newDepartments: string[];
+  historicalNodes: string[];
+  issues: SpSeedImportIssue[];
+  issueCount: number;
+}
+
+export async function fetchSpSeedCatalog() {
+  const { data } = await api.get<Record<string, unknown>>(
+    '/strategic-plan/seed-catalog',
+  );
+  return data;
+}
+
+export async function importSpSeedSnapshot(payload: {
+  year: number;
+  dryRun: boolean;
+  replaceMissing: boolean;
+  jsonMode: SpSeedJsonMode;
+  strategies: unknown[];
+}) {
+  const { data } = await api.post<SpSeedImportResult>(
+    '/strategic-plan/seed-snapshot',
+    payload,
+  );
+  return data;
+}

@@ -13,7 +13,12 @@ import {
   STUDENT_COUNT_COMPONENT_CODES,
   STUDENT_COUNT_COMPONENT_SHORT_LABELS,
 } from './catalog';
-import { composeAccountingHierarchy } from './composeAccounting';
+import {
+  ACCOUNTING_YEAR_LAG,
+  composeAccountingHierarchy,
+  projectAccountingDeptMaps,
+  projectAccountingYearMap,
+} from './composeAccounting';
 import {
   composeFormulaHierarchy,
   composeAdditiveHierarchy,
@@ -751,57 +756,69 @@ export function buildKpiViews(
 
   for (const [id, entry] of Object.entries(bundle.accountings)) {
     if (!entry.found) continue;
+    // 조회 연도 행은 직전 연도 결산이므로 표시 연도를 1년 당긴다.
+    const accountingYear = selectedYear - ACCOUNTING_YEAR_LAG;
+    const accountingYears = trendYearWindow(accountingYear);
+    const income = projectAccountingYearMap(entry.income.univ, accountingYears);
+    const expense = projectAccountingYearMap(
+      entry.expense.univ,
+      accountingYears,
+    );
+    const incomeDepts = projectAccountingDeptMaps(
+      entry.income.depts,
+      accountingYears,
+    );
+    const expenseDepts = projectAccountingDeptMaps(
+      entry.expense.depts,
+      accountingYears,
+    );
     views.push({
       id: id as MonitoringKpiId,
       label: entry.label,
       unit: entry.unit,
       found: entry.found,
       hasHierarchy:
-        hasHierarchyData(
-          entry.income.depts,
-          selectedYear,
-          entry.income.univ,
-        ) ||
-        hasHierarchyData(
-          entry.expense.depts,
-          selectedYear,
-          entry.expense.univ,
-        ),
-      selectedYear,
-      years,
-      univ: entry.income.univ,
-      depts: entry.income.depts,
-      yoy: computeYoy(entry.income.univ, years, entry.kpi.direction, selectedYear),
+        hasHierarchyData(incomeDepts, accountingYear, income) ||
+        hasHierarchyData(expenseDepts, accountingYear, expense),
+      selectedYear: accountingYear,
+      years: accountingYears,
+      univ: income,
+      depts: incomeDepts,
+      yoy: computeYoy(
+        income,
+        accountingYears,
+        entry.kpi.direction,
+        accountingYear,
+      ),
       kpi: entry.kpi,
       valueSource:
-        entry.income.univ[selectedYear] != null ||
-        entry.expense.univ[selectedYear] != null
+        income[accountingYear] != null || expense[accountingYear] != null
           ? 'MONITORING'
           : null,
       accounting: {
-        income: entry.income.univ,
-        expense: entry.expense.univ,
-        incomeDepts: entry.income.depts,
-        expenseDepts: entry.expense.depts,
+        income,
+        expense,
+        incomeDepts,
+        expenseDepts,
         incomeYoy: computeYoy(
-          entry.income.univ,
-          years,
+          income,
+          accountingYears,
           entry.kpi.direction,
-          selectedYear,
+          accountingYear,
         ),
         expenseYoy: computeYoy(
-          entry.expense.univ,
-          years,
+          expense,
+          accountingYears,
           entry.kpi.direction,
-          selectedYear,
+          accountingYear,
         ),
         incomeLines: entry.incomeLines.map((l) => ({
           name: l.name,
-          univ: l.values.univ,
+          univ: projectAccountingYearMap(l.values.univ, accountingYears),
         })),
         expenseLines: entry.expenseLines.map((l) => ({
           name: l.name,
-          univ: l.values.univ,
+          univ: projectAccountingYearMap(l.values.univ, accountingYears),
         })),
       },
     });

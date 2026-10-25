@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { logDataExport } from '@/lib/exportLog';
 import { taskBudgetUnits } from './evalDraft';
-import { achievementRate, fmt1, parseAmount } from './format';
+import { achievementRate, fmt1, isInverseKpi, parseAmount } from './format';
 import type {
   SpBudgetDraft,
   SpFundSource,
@@ -51,12 +51,16 @@ export function writeXlsxAndLog({
 
 export function kpiExportRows(kpis: SpKpi[], year: number): XlsxCell[][] {
   const rows: XlsxCell[][] = [
-    ['코드', '지표명', '단위', '기준값', '목표', '실적', '달성률'],
+    ['코드', '지표명', '단위', '기준값', '목표', '실적', '달성률', '달성여부'],
   ];
   for (const kpi of kpis) {
     const target = kpi.targets[year] ?? null;
     const actual = kpi.results[year] ?? null;
-    const rate = achievementRate(actual, target);
+    const rate = achievementRate(
+      actual,
+      target,
+      isInverseKpi(kpi.kpiCode, kpi.displayCode),
+    );
     rows.push([
       kpi.displayCode ?? kpi.kpiCode,
       kpi.kpiName,
@@ -65,6 +69,7 @@ export function kpiExportRows(kpis: SpKpi[], year: number): XlsxCell[][] {
       target ?? '',
       actual ?? '',
       rate === null ? '' : `${fmt1(rate)}%`,
+      rate === null ? '미입력' : rate >= 100 ? '달성' : '미달성',
     ]);
   }
   return rows;

@@ -20,6 +20,7 @@ import {
   IrSpWriteLock,
 } from '../../entities';
 import { InternalOrgModule } from '../internal-org/internal-org.module';
+import { SpSeedImportService } from './sp-seed-import.service';
 import { SpStructureService } from './sp-structure.service';
 import { StrategicPlanController } from './strategic-plan.controller';
 import { StrategicPlanService } from './strategic-plan.service';
@@ -48,7 +49,7 @@ import { StrategicPlanService } from './strategic-plan.service';
     InternalOrgModule,
   ],
   controllers: [StrategicPlanController],
-  providers: [StrategicPlanService, SpStructureService],
+  providers: [StrategicPlanService, SpStructureService, SpSeedImportService],
   exports: [StrategicPlanService],
 })
 export class StrategicPlanModule {}

@@ -8,7 +8,12 @@ import {
   kpiExportRows,
   writeXlsxAndLog,
 } from '@/lib/strategic-plan/exportXlsx';
-import { achievementRate, fmt, fmt1 } from '@/lib/strategic-plan/format';
+import {
+  achievementRate,
+  fmt,
+  fmt1,
+  isInverseKpi,
+} from '@/lib/strategic-plan/format';
 import { goalAccent } from '@/lib/strategic-plan/goalAccent';
 import type { SpKpi, SpTask } from '@/lib/strategic-plan/types';
 import { cn } from '@/lib/utils';
@@ -24,6 +29,50 @@ function sortValue(kpi: SpKpi, key: SpKpiSortKey, year: number) {
   if (key === 'baseline') return kpi.baseline;
   if (key === 'lastTarget') return kpi.targets[year] ?? null;
   return null;
+}
+
+function kpiRate(kpi: SpKpi, year: number) {
+  return achievementRate(
+    kpi.results[year] ?? null,
+    kpi.targets[year] ?? null,
+    isInverseKpi(kpi.kpiCode, kpi.displayCode),
+  );
+}
+
+/** 달성률 100% 이상은 달성, 그 미만은 미달성, 실적·목표가 없어 계산할 수 없으면 미입력 */
+function outcomeCounts(kpis: SpKpi[], year: number) {
+  let achieved = 0;
+  let missed = 0;
+  let missing = 0;
+  for (const kpi of kpis) {
+    const rate = kpiRate(kpi, year);
+    if (rate === null) missing += 1;
+    else if (rate >= 100) achieved += 1;
+    else missed += 1;
+  }
+  return { achieved, missed, missing, total: kpis.length };
+}
+
+function OutcomeLight({ rate }: { rate: number | null }) {
+  if (rate === null) {
+    return <span className="text-muted-foreground">–</span>;
+  }
+  const achieved = rate >= 100;
+  return (
+    <span
+      className="inline-flex items-center justify-center"
+      title={achieved ? '달성' : '미달성'}
+      aria-label={achieved ? '달성' : '미달성'}
+    >
+      <span
+        className={cn(
+          'h-3.5 w-3.5 rounded-full',
+          achieved ? 'bg-emerald-500' : 'bg-red-500',
+        )}
+        aria-hidden
+      />
+    </span>
+  );
 }
 
 function DetailRow({
@@ -53,7 +102,7 @@ function DetailRow({
           </div>
           <div>
             <SectionLabel>책임부서</SectionLabel>
-            <p className="text-sm">{task?.primaryDept ?? '–'}</p>
+            <p className="text-sm">{kpi.primaryDept || task?.primaryDept || '–'}</p>
           </div>
           <div>
             <SectionLabel>기준값 참조</SectionLabel>
@@ -115,6 +164,8 @@ export function KpiView({
     });
   }, [kpis, kpiSort, year]);
 
+  const counts = useMemo(() => outcomeCounts(kpis, year), [kpis, year]);
+
   if (kpis.length === 0) {
     return <EmptyState>조건에 맞는 KPI가 없습니다.</EmptyState>;
   }
@@ -131,7 +182,7 @@ export function KpiView({
     });
   };
 
-  const colSpan = 7;
+  const colSpan = 8;
 
   const sortHeader = (key: SpKpiSortKey, label: string) => (
     <th className="whitespace-nowrap px-3 py-2 text-left font-bold">
@@ -157,6 +208,20 @@ export function KpiView({
         </Button>
       </div>
       <div className="overflow-x-auto rounded-md border">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b bg-muted/40 px-3 py-2 text-sm">
+          <span className="text-emerald-700">
+            달성 <b>{counts.achieved}</b>건
+          </span>
+          <span className="text-red-600">
+            미달성 <b>{counts.missed}</b>건
+          </span>
+          <span className="text-muted-foreground">
+            미입력 <b>{counts.missing}</b>건
+          </span>
+          <span>
+            총계 <b>{counts.total}</b>건
+          </span>
+        </div>
         <table className="w-full min-w-[720px] text-sm">
         <thead className="border-b bg-muted/50">
           <tr>
@@ -173,6 +238,9 @@ export function KpiView({
             <th className="whitespace-nowrap px-3 py-2 text-left font-bold">
               달성률
             </th>
+            <th className="whitespace-nowrap px-3 py-2 text-center font-bold">
+              달성여부
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -182,7 +250,7 @@ export function KpiView({
             const open = openCodes.has(kpi.kpiCode);
             const target = kpi.targets[year] ?? null;
             const actual = kpi.results[year] ?? null;
-            const rate = achievementRate(actual, target);
+            const rate = kpiRate(kpi, year);
             return (
               <Fragment key={kpi.kpiCode}>
                 <tr
@@ -216,7 +284,7 @@ export function KpiView({
                     <span className="block font-bold">{kpi.kpiName}</span>
                     {task && (
                       <span className="block text-muted-foreground">
-                        {task.taskName} · {task.primaryDept}
+                        {task.taskName} · {kpi.primaryDept || task.primaryDept}
                       </span>
                     )}
                   </td>
@@ -239,6 +307,9 @@ export function KpiView({
                     )}
                   >
                     {rate === null ? '–' : `${fmt1(rate)}%`}
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <OutcomeLight rate={rate} />
                   </td>
                 </tr>
                 {open && (

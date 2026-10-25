@@ -40,21 +40,39 @@ export function parseAmount(input: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-/** 달성률(%) = 실적 ÷ 목표 × 100 */
+/**
+ * 낮을수록 좋은 지표. 달성률은 목표 ÷ 실적 × 100 이다.
+ * 전공교과목 강좌당 학생수(A22b)가 여기에 해당한다.
+ */
+const INVERSE_KPI_CODES = new Set(['A22b']);
+
+export function isInverseKpi(
+  ...codes: Array<string | null | undefined>
+): boolean {
+  return codes.some(
+    (code) => code != null && INVERSE_KPI_CODES.has(code.trim()),
+  );
+}
+
+/**
+ * 달성률(%). 일반 지표는 실적 ÷ 목표, 역지표는 목표 ÷ 실적.
+ * 100 이상이면 달성이다.
+ */
 export function achievementRate(
   actual: number | null | undefined,
   target: number | null | undefined,
+  inverse = false,
 ): number | null {
   if (actual === null || actual === undefined || Number.isNaN(actual)) {
     return null;
   }
-  if (
-    target === null ||
-    target === undefined ||
-    Number.isNaN(target) ||
-    target === 0
-  ) {
+  if (target === null || target === undefined || Number.isNaN(target)) {
     return null;
   }
+  if (inverse) {
+    if (actual === 0) return null;
+    return (target / actual) * 100;
+  }
+  if (target === 0) return null;
   return (actual / target) * 100;
 }

@@ -130,6 +130,83 @@ function formatRowLocation(row: ParsedRowInput): string {
   return `${row.sheetName} ${row.rowNumber}행`;
 }
 
+const OOXML_COMMENTS_REL =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments';
+
+/** ExcelJS는 시트 관계의 메모 경로를 못 찾으면 comments 접근에서 500으로 죽는다. */
+function isExcelJsCommentCrash(err: unknown): boolean {
+  return (
+    err instanceof TypeError && err.message.includes("reading 'comments'")
+  );
+}
+
+/**
+ * 업로드는 셀 값만 읽는다. Excel이 붙인 메모 관계·메모 XML은 빼고 다시 연다.
+ * 메모 파일이 없거나 경로가 어긋나면 ExcelJS가 여기서 죽으므로, 그 부분만 제거한다.
+ */
+async function withoutCommentParts(buffer: Buffer): Promise<Buffer> {
+  const JSZip = require('jszip') as {
+    loadAsync(data: Buffer): Promise<{
+      files: Record<string, unknown>;
+      file(name: string): { async(type: 'string'): Promise<string> } | null;
+      file(name: string, data: string): void;
+      remove(name: string): void;
+      generateAsync(options: {
+        type: 'nodebuffer';
+        compression: 'DEFLATE';
+      }): Promise<Buffer>;
+    }>;
+  };
+  const zip = await JSZip.loadAsync(buffer);
+  let changed = false;
+  for (const name of Object.keys(zip.files)) {
+    if (
+      /^xl\/comments\d+\.xml$/i.test(name) ||
+      /^xl\/threadedComments\//i.test(name)
+    ) {
+      zip.remove(name);
+      changed = true;
+      continue;
+    }
+    if (!/^xl\/worksheets\/_rels\/sheet\d+\.xml\.rels$/i.test(name)) continue;
+    const file = zip.file(name);
+    if (!file) continue;
+    const xml = await file.async('string');
+    const next = xml.replace(/<Relationship\b[\s\S]*?\/>/g, (tag) =>
+      tag.includes(OOXML_COMMENTS_REL) ? '' : tag,
+    );
+    if (next !== xml) {
+      zip.file(name, next);
+      changed = true;
+    }
+  }
+  if (!changed) return buffer;
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
+  const open = async (data: Buffer) => {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(data as unknown as ArrayBuffer);
+    return workbook;
+  };
+  try {
+    return await open(buffer);
+  } catch (err) {
+    if (!isExcelJsCommentCrash(err)) throw err;
+  }
+  try {
+    return await open(await withoutCommentParts(buffer));
+  } catch (err) {
+    if (isExcelJsCommentCrash(err)) {
+      throw new BadRequestException(
+        '엑셀 메모를 읽는 중 오류가 났습니다. 셀 메모를 지우고 다시 저장한 뒤 올려 주세요.',
+      );
+    }
+    throw err;
+  }
+}
+
 function normalizeMetricName(value: string): string {
   return value.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase('ko');
 }
@@ -242,8 +319,7 @@ export class UploadService {
     buffer: Buffer,
     expectedSourceType: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>,
   ): Promise<ParsedRowInput[]> {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
+    const workbook = await loadWorkbook(buffer);
     const firstSheet = workbook.worksheets[0];
     if (!firstSheet) {
       throw new BadRequestException('엑셀 시트를 찾을 수 없습니다.');

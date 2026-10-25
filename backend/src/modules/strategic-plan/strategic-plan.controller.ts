@@ -35,6 +35,7 @@ import {
   UpdateStrategyDto,
   UpdateSubtaskDto,
   UpdateTaskDto,
+  ImportSeedSnapshotDto,
   UpdateVisionDto,
   UpsertBudgetDto,
   UpsertEvaluationDto,
@@ -45,6 +46,7 @@ import {
   UpsertTaskDto,
   YearQueryDto,
 } from './dto/strategic-plan.dto';
+import { SpSeedImportService } from './sp-seed-import.service';
 import {
   StrategicPlanService,
   type SpCompareIndicator,
@@ -52,7 +54,10 @@ import {
 
 @Controller('strategic-plan')
 export class StrategicPlanController {
-  constructor(private readonly service: StrategicPlanService) {}
+  constructor(
+    private readonly service: StrategicPlanService,
+    private readonly seedImport: SpSeedImportService,
+  ) {}
 
   /* ── 대시보드: 로그인 사용자 전원 ── */
 
@@ -99,6 +104,23 @@ export class StrategicPlanController {
   @Put('budgets')
   upsertBudget(@Body() dto: UpsertBudgetDto, @CurrentUser() user: JwtPayload) {
     return this.service.upsertBudget(dto, user.sub);
+  }
+
+  /** 보고서 JSON으로 해당 연도 예결산·자체평가를 임시 반영 */
+  @Roles('admin')
+  @Post('seed-snapshot')
+  importSeedSnapshot(
+    @Body() dto: ImportSeedSnapshotDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return this.seedImport.importSnapshot(dto, user.sub);
+  }
+
+  /** 추출 LLM에 넘길 닫힌 코드표 */
+  @Roles('admin')
+  @Get('seed-catalog')
+  seedCatalog() {
+    return this.seedImport.extractionCatalog();
   }
 
   @Get('write-locks')

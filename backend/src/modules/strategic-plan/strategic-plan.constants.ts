@@ -21,9 +21,17 @@ export const SP_SURVEY_PLAN_GRADES = [
 export const SP_DEFAULT_FUND_SOURCES = [
   '교비',
   '재정지원사업(혁신)',
+  '재정지원사업(RISE)',
   '재정지원사업(앵커)',
   '재정지원사업(AID)',
   '재정지원사업 기타',
+  '신산업',
   '지자체 사업',
   '기타',
 ] as const;
+
+/**
+ * 보고서 합계를 재원 구분 없이 넣을 때 쓰는 임시 재원.
+ * 해당 연도 예결산·결산조회에만 보이고, 다른 재원 금액은 건드리지 않는다.
+ */
+export const SP_SEED_FUND_SOURCE_NAME = '초기시딩 합계';
