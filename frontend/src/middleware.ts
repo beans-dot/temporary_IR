@@ -35,6 +35,8 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Vercel Services는 Edge 함수를 받지 않는다.
+  runtime: 'nodejs',
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|logo.png|ysu-ir-library-wordmark.png|api/).*)',
   ],

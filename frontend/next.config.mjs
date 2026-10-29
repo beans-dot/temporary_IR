@@ -1,5 +1,12 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const frontendRoot = path.dirname(fileURLToPath(import.meta.url));
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // 저장소 루트에도 lockfile이 있다. 트레이싱이 그쪽으로 올라가면 Services 번들이 깨진다.
+  outputFileTracingRoot: frontendRoot,
   reactStrictMode: true,
   images: {
     // 로컬 /logo.png 사용. 외부 도메인 필요 시 여기에 추가.
