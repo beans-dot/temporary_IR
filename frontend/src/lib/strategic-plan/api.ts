@@ -377,7 +377,7 @@ export async function uploadSpVisionImage(file: File) {
   );
   return {
     filename: data.filename,
-    url: `/api/backend${data.url}`,
+    url: `/api${data.url}`,
   };
 }
 

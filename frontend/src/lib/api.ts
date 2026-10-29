@@ -1,18 +1,33 @@
 import axios from 'axios';
 import { clearAuthCookies, readTokenFromDocument } from '@/lib/auth';
 
-// 브라우저에서는 Next rewrite(/api/backend/*)를 경유, 서버 컴포넌트에서는 직접 백엔드 호출
-const isServer = typeof window === 'undefined';
-const serverBase =
+const LOCAL_API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000/api';
 
+/** 바인딩 값은 빌드에 넣지 않는다. 함수가 실행될 때 읽는다. */
+function boundBackendUrl(): string | undefined {
+  return process.env['BACKEND_URL'];
+}
+
+/**
+ * 브라우저: 공개 경로 /api (vercel.json이 backend 서비스로 보낸다).
+ * 서버 함수: 프론트 서비스에 주입된 BACKEND_URL. 없으면 로컬 Nest.
+ */
+function apiBaseUrl(): string {
+  if (typeof window !== 'undefined') return '/api';
+  const bound = boundBackendUrl();
+  if (!bound) return LOCAL_API_BASE;
+  const base = bound.endsWith('/') ? bound : `${bound}/`;
+  return new URL('api', base).href.replace(/\/$/, '');
+}
+
 export const api = axios.create({
-  baseURL: isServer ? serverBase : '/api/backend',
+  baseURL: apiBaseUrl(),
   timeout: 30000,
 });
 
 api.interceptors.request.use((config) => {
-  if (!isServer) {
+  if (typeof window !== 'undefined') {
     const token = readTokenFromDocument();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -24,7 +39,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    if (!isServer && error?.response?.status === 401) {
+    if (typeof window !== 'undefined' && error?.response?.status === 401) {
       const url = String(error?.config?.url || '');
       // 로그인/회원가입 실패는 세션 정리하지 않음
       if (
