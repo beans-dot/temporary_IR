@@ -18,6 +18,7 @@ import { UniversitiesModule } from './modules/universities/universities.module';
 import { UpdateLogModule } from './modules/update-log/update-log.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { UsersModule } from './modules/users/users.module';
+import { RootController } from './root.controller';
 
 @Module({
   imports: [
@@ -39,5 +40,6 @@ import { UsersModule } from './modules/users/users.module';
     RawCorrectionModule,
     StrategicPlanModule,
   ],
+  controllers: [RootController],
 })
 export class AppModule {}
