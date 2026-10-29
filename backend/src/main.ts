@@ -1,9 +1,5 @@
-import './config/load-env';
-import { createServer } from 'http';
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { json, urlencoded } from 'express';
-import { AppModule } from './app.module';
+import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import type { Express } from 'express';
 
 function redact(value: string): string {
   return value.replace(/(\/\/[^/\s:@]+):([^@\s]+)@/g, '$1:***@');
@@ -16,11 +12,13 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function listenFallback(port: number, error: unknown): Promise<void> {
-  const detail = redact(
-    error instanceof Error ? error.stack || error.message : String(error),
-  ).slice(0, 1500);
-  const html = `<!doctype html>
+function errorText(error: unknown): string {
+  const raw = error instanceof Error ? error.stack || error.message : String(error);
+  return redact(raw).slice(0, 1500);
+}
+
+function errorHtml(detail: string): string {
+  return `<!doctype html>
 <html lang="ko">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -37,26 +35,39 @@ function listenFallback(port: number, error: unknown): Promise<void> {
   <pre style="white-space: pre-wrap; background: #f4f4f5; padding: 1rem">${escapeHtml(detail)}</pre>
 </body>
 </html>`;
-
-  const server = createServer((_req, res) => {
-    res.statusCode = 503;
-    res.setHeader('content-type', 'text/html; charset=utf-8');
-    res.end(html);
-  });
-
-  return new Promise((resolve) => {
-    server.listen(port, () => resolve());
-  });
 }
 
-async function bootstrap() {
-  const port = parseInt(process.env.PORT || '4000', 10);
+const port = parseInt(process.env.PORT || '4000', 10);
+let bootError: string | null = null;
+let expressApp: Express | null = null;
+
+function noteFailure(error: unknown) {
+  if (expressApp) return;
+  bootError = errorText(error);
+  // eslint-disable-next-line no-console
+  console.error('[YSU-IR] bootstrap failed', bootError);
+}
+
+process.on('uncaughtException', noteFailure);
+process.on('unhandledRejection', noteFailure);
+
+const ready = (async () => {
   try {
-    const app = await NestFactory.create(AppModule, { bodyParser: false });
-    // 초기시딩 JSON이 기본 100kb를 넘을 수 있다.
+    await import('./config/load-env');
+    const { default: express, json, urlencoded } = await import('express');
+    const { RequestMethod, ValidationPipe } = await import('@nestjs/common');
+    const { NestFactory } = await import('@nestjs/core');
+    const { ExpressAdapter } = await import('@nestjs/platform-express');
+    const { AppModule } = await import('./app.module');
+
+    const appExpress = express();
+    const app = await NestFactory.create(
+      AppModule,
+      new ExpressAdapter(appExpress),
+      { bodyParser: false },
+    );
     app.use(json({ limit: '4mb' }));
     app.use(urlencoded({ extended: true, limit: '4mb' }));
-
     app.setGlobalPrefix('api', {
       exclude: [{ path: '/', method: RequestMethod.GET }],
     });
@@ -67,15 +78,24 @@ async function bootstrap() {
       origin: (process.env.CORS_ORIGIN || '*').split(','),
       credentials: true,
     });
-
-    await app.listen(port);
+    await app.init();
+    expressApp = appExpress;
     // eslint-disable-next-line no-console
     console.log(`[YSU-IR] Backend listening on http://localhost:${port}/api`);
   } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('[YSU-IR] bootstrap failed', redact(String(error)));
-    await listenFallback(port, error);
+    noteFailure(error);
   }
-}
+})();
 
-bootstrap();
+const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  await ready;
+  if (bootError || !expressApp) {
+    res.statusCode = 503;
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.end(errorHtml(bootError || 'API를 시작하지 못했습니다.'));
+    return;
+  }
+  expressApp(req, res);
+});
+
+server.listen(port);
