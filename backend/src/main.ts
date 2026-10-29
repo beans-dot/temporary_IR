@@ -13,7 +13,8 @@ function escapeHtml(value: string): string {
 }
 
 function errorText(error: unknown): string {
-  const raw = error instanceof Error ? error.stack || error.message : String(error);
+  const raw =
+    error instanceof Error ? error.stack || error.message : String(error);
   return redact(raw).slice(0, 1500);
 }
 
@@ -37,65 +38,93 @@ function errorHtml(detail: string): string {
 </html>`;
 }
 
-const port = parseInt(process.env.PORT || '4000', 10);
-let bootError: string | null = null;
-let expressApp: Express | null = null;
-
-function noteFailure(error: unknown) {
-  if (expressApp) return;
-  bootError = errorText(error);
-  // eslint-disable-next-line no-console
-  console.error('[YSU-IR] bootstrap failed', bootError);
+function hasRemoteDatabase(): boolean {
+  if (process.env.DATABASE_URL || process.env.POSTGRES_URL) return true;
+  const host = process.env.DB_HOST;
+  if (!host) return false;
+  return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
 }
 
-process.on('uncaughtException', noteFailure);
-process.on('unhandledRejection', noteFailure);
+const port = parseInt(process.env.PORT || '4000', 10);
 
-const ready = (async () => {
-  try {
-    await import('./config/load-env');
-    const { default: express, json, urlencoded } = await import('express');
-    const { RequestMethod, ValidationPipe } = await import('@nestjs/common');
-    const { NestFactory } = await import('@nestjs/core');
-    const { ExpressAdapter } = await import('@nestjs/platform-express');
-    const { AppModule } = await import('./app.module');
-
-    const appExpress = express();
-    const app = await NestFactory.create(
-      AppModule,
-      new ExpressAdapter(appExpress),
-      { bodyParser: false },
-    );
-    app.use(json({ limit: '4mb' }));
-    app.use(urlencoded({ extended: true, limit: '4mb' }));
-    app.setGlobalPrefix('api', {
-      exclude: [{ path: '/', method: RequestMethod.GET }],
-    });
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
-    app.enableCors({
-      origin: (process.env.CORS_ORIGIN || '*').split(','),
-      credentials: true,
-    });
-    await app.init();
-    expressApp = appExpress;
-    // eslint-disable-next-line no-console
-    console.log(`[YSU-IR] Backend listening on http://localhost:${port}/api`);
-  } catch (error) {
-    noteFailure(error);
-  }
-})();
-
-const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-  await ready;
-  if (bootError || !expressApp) {
+// Vercel에는 로컬 PostgreSQL이 없다. Nest를 올리면 연결 실패가 함수를 죽인다.
+if (process.env.VERCEL && !hasRemoteDatabase()) {
+  const detail =
+    'DB_HOST가 없거나 localhost입니다. Vercel에서는 원격 Postgres의 DATABASE_URL이 필요합니다.';
+  createServer((_req, res) => {
     res.statusCode = 503;
     res.setHeader('content-type', 'text/html; charset=utf-8');
-    res.end(errorHtml(bootError || 'API를 시작하지 못했습니다.'));
-    return;
-  }
-  expressApp(req, res);
-});
+    res.setHeader('x-ysu-ir-boot', 'no-database');
+    res.end(errorHtml(detail));
+  }).listen(port);
+} else {
+  void bootNest(port);
+}
 
-server.listen(port);
+function bootNest(listenPort: number) {
+  let bootError: string | null = null;
+  let expressApp: Express | null = null;
+
+  const noteFailure = (error: unknown) => {
+    if (expressApp) return;
+    bootError = errorText(error);
+    // eslint-disable-next-line no-console
+    console.error('[YSU-IR] bootstrap failed', bootError);
+  };
+
+  process.on('uncaughtException', noteFailure);
+  process.on('unhandledRejection', noteFailure);
+
+  const ready = (async () => {
+    try {
+      await import('./config/load-env');
+      const { default: express, json, urlencoded } = await import('express');
+      const { RequestMethod, ValidationPipe } = await import('@nestjs/common');
+      const { NestFactory } = await import('@nestjs/core');
+      const { ExpressAdapter } = await import('@nestjs/platform-express');
+      const { AppModule } = await import('./app.module');
+
+      const appExpress = express();
+      const app = await NestFactory.create(
+        AppModule,
+        new ExpressAdapter(appExpress),
+        { bodyParser: false },
+      );
+      app.use(json({ limit: '4mb' }));
+      app.use(urlencoded({ extended: true, limit: '4mb' }));
+      app.setGlobalPrefix('api', {
+        exclude: [{ path: '/', method: RequestMethod.GET }],
+      });
+      app.useGlobalPipes(
+        new ValidationPipe({ whitelist: true, transform: true }),
+      );
+      app.enableCors({
+        origin: (process.env.CORS_ORIGIN || '*').split(','),
+        credentials: true,
+      });
+      await app.init();
+      expressApp = appExpress;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[YSU-IR] Backend listening on http://localhost:${listenPort}/api`,
+      );
+    } catch (error) {
+      noteFailure(error);
+    }
+  })();
+
+  const server = createServer(
+    async (req: IncomingMessage, res: ServerResponse) => {
+      await ready;
+      if (bootError || !expressApp) {
+        res.statusCode = 503;
+        res.setHeader('content-type', 'text/html; charset=utf-8');
+        res.end(errorHtml(bootError || 'API를 시작하지 못했습니다.'));
+        return;
+      }
+      expressApp(req, res);
+    },
+  );
+
+  server.listen(listenPort);
+}
