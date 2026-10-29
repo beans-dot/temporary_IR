@@ -42,6 +42,7 @@ export class AuthService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureAdminSeed();
+    await this.ensureTestUserSeed();
   }
 
   private async ensureAdminSeed() {
@@ -63,6 +64,44 @@ export class AuthService implements OnModuleInit {
         approvedBy: 'system',
       }),
     );
+  }
+
+  /** 로그인 화면의 "user로 로그인"이 사용하는 조회 전용 테스트 계정. */
+  private async ensureTestUserSeed() {
+    const id = 'test_user_1';
+    const passwordHash = await bcrypt.hash('test1234', 10);
+    const existing = await this.usersRepo.findOne({ where: { id } });
+
+    if (!existing) {
+      await this.usersRepo.save(
+        this.usersRepo.create({
+          id,
+          name: '테스트 사용자',
+          email: 'test_user_1@yeonsung.ac.kr',
+          passwordHash,
+          affiliationType: '기타',
+          department: '테스트',
+          extension: '-',
+          role: 'user',
+          status: 'approved',
+          approvedAt: new Date(),
+          approvedBy: 'system',
+        }),
+      );
+      return;
+    }
+
+    existing.name = '테스트 사용자';
+    existing.email = 'test_user_1@yeonsung.ac.kr';
+    existing.passwordHash = passwordHash;
+    existing.affiliationType = existing.affiliationType ?? '기타';
+    existing.department = existing.department || '테스트';
+    existing.extension = existing.extension || '-';
+    existing.role = 'user';
+    existing.status = 'approved';
+    existing.approvedAt = existing.approvedAt ?? new Date();
+    existing.approvedBy = existing.approvedBy ?? 'system';
+    await this.usersRepo.save(existing);
   }
 
   private toPublicUser(user: IrUser) {

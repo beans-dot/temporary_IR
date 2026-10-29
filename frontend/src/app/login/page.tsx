@@ -23,6 +23,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [quickTarget, setQuickTarget] = useState<'admin' | 'user' | null>(null);
 
   useEffect(() => {
     hydrate();
@@ -40,6 +41,24 @@ export default function LoginPage() {
     setSubmitting(true);
     const result = await login(id, password);
     setSubmitting(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    router.replace(homePathForRole(result.user.role));
+  };
+
+  const quickLogin = async (
+    loginId: string,
+    loginPassword: string,
+    target: 'admin' | 'user',
+  ) => {
+    setError(null);
+    setSubmitting(true);
+    setQuickTarget(target);
+    const result = await login(loginId, loginPassword);
+    setSubmitting(false);
+    setQuickTarget(null);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -99,8 +118,39 @@ export default function LoginPage() {
               </p>
             )}
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? '로그인 중…' : '로그인'}
+              {submitting && !quickTarget ? '로그인 중…' : '로그인'}
             </Button>
+            <div className="space-y-2 pt-1">
+              <p className="text-center text-xs font-medium text-muted-foreground">
+                테스트 로그인
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => quickLogin('admin', '21672167', 'admin')}
+                  disabled={submitting}
+                  className="rounded-lg border border-input bg-background px-3 py-3 text-left transition-colors hover:bg-accent disabled:opacity-50"
+                >
+                  <span className="block text-sm font-bold">admin으로 로그인</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {quickTarget === 'admin' ? '로그인 중…' : '관리자'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => quickLogin('test_user_1', 'test1234', 'user')}
+                  disabled={submitting}
+                  className="rounded-lg border border-input bg-background px-3 py-3 text-left transition-colors hover:bg-accent disabled:opacity-50"
+                >
+                  <span className="block text-sm font-bold">user로 로그인</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {quickTarget === 'user'
+                      ? '로그인 중…'
+                      : 'test_user_1 · 조회'}
+                  </span>
+                </button>
+              </div>
+            </div>
             <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
               <p>
                 계정이 없으신가요?{' '}

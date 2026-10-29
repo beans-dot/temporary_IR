@@ -243,7 +243,7 @@ export class AlimiService {
           },
           {
             operation: 'getComparisonLibraryBudgetCrntSt',
-            label: '도서관 예산',
+            label: '대학 총결산 대비 자료구입비 비율',
           },
           {
             operation: 'getComparisonSchoolGroundsAndBdsEnsureRate',
