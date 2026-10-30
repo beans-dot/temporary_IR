@@ -9,7 +9,8 @@ const nextConfig = {
   outputFileTracingRoot: frontendRoot,
   reactStrictMode: true,
   images: {
-    // 로컬 /logo.png 사용. 외부 도메인 필요 시 여기에 추가.
+    // Services 배포에서는 /_next/image 가 404다. public 파일을 그대로 쓴다.
+    unoptimized: true,
     remotePatterns: [],
   },
   async rewrites() {

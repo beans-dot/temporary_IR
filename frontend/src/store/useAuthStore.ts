@@ -14,6 +14,10 @@ import {
 
 function apiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    if (status === 502 || status === 503 || !error.response) {
+      return '서버가 데이터베이스에 연결되지 않았습니다. 로그인 정보가 틀린 것이 아닙니다.';
+    }
     const data = error.response?.data as
       | { message?: string | string[] }
       | undefined;
