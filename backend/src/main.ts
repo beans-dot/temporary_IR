@@ -1,5 +1,15 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import 'reflect-metadata';
+import 'dotenv';
+import 'dotenv-expand';
+import 'pg';
+import './config/load-env';
+import express, { json, urlencoded } from 'express';
 import type { Express } from 'express';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import { ExpressAdapter } from '@nestjs/platform-express';
+import { createServer, type IncomingMessage, type ServerResponse } from 'http';
+import { AppModule } from './app.module';
 
 function redact(value: string): string {
   return value.replace(/(\/\/[^/\s:@]+):([^@\s]+)@/g, '$1:***@');
@@ -83,13 +93,6 @@ function bootNest(listenPort: number) {
 
   const ready = (async () => {
     try {
-      await import('./config/load-env');
-      const { default: express, json, urlencoded } = await import('express');
-      const { RequestMethod, ValidationPipe } = await import('@nestjs/common');
-      const { NestFactory } = await import('@nestjs/core');
-      const { ExpressAdapter } = await import('@nestjs/platform-express');
-      const { AppModule } = await import('./app.module');
-
       const appExpress = express();
       const app = await NestFactory.create(
         AppModule,
