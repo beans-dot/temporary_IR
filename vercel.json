@@ -4,14 +4,8 @@
     "backend": {
       "root": "backend",
       "framework": "nestjs",
-      "functions": {
-        "src/main.ts": {
-          "includeFiles": "node_modules/**"
-        },
-        "dist/main.js": {
-          "includeFiles": "node_modules/**"
-        }
-      }
+      "entrypoint": "dist/vercel/index.js",
+      "buildCommand": "npm run build && npx ncc build dist/main.js -o dist/vercel"
     },
     "frontend": {
       "root": "frontend",
