@@ -5,15 +5,15 @@ import { readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 function listTaskFiles(dir: string, depth = 0): string[] {
-  if (depth > 2) return [];
+  if (depth > 3) return [];
   let names: string[] = [];
   try {
     names = readdirSync(dir);
   } catch {
-    return [`${dir} (unreadable)`];
+    return [];
   }
   const lines: string[] = [];
-  for (const name of names.slice(0, 40)) {
+  for (const name of names.slice(0, 50)) {
     const full = join(dir, name);
     let isDir = false;
     try {
@@ -21,33 +21,57 @@ function listTaskFiles(dir: string, depth = 0): string[] {
     } catch {
       isDir = false;
     }
-    lines.push(`${'  '.repeat(depth)}${name}${isDir ? '/' : ''}`);
-    if (isDir) lines.push(...listTaskFiles(full, depth + 1));
+    lines.push(`${'  '.repeat(depth)}${full}${isDir ? '/' : ''}`);
+    if (isDir && name !== 'node_modules') {
+      lines.push(...listTaskFiles(full, depth + 1));
+    }
   }
   return lines;
 }
 
-if (process.env.VERCEL) {
-  const failures: string[] = [];
-  const load = (loader: () => void, label: string) => {
-    try {
-      loader();
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      failures.push(`${label}: ${message}`);
-      return false;
+function findBundle(dir: string, depth = 0): string | null {
+  if (depth > 4) return null;
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    const full = join(dir, name);
+    if (name === 'vercel-bundle.js' || name === 'index.js' && dir.includes('vercel-bundle')) {
+      return full;
     }
-  };
-  const started =
-    load(() => require('./backend/vercel-bundle/index.js'), 'backend') ||
-    load(() => require('./vercel-bundle/index.js'), 'same') ||
-    load(() => require('../vercel-bundle/index.js'), 'parent') ||
-    load(() => require('./src/vercel-bundle/index.js'), 'src');
-  if (!started) {
-    throw new Error(
-      `${failures.join('\n')}\n/var/task:\n${listTaskFiles('/var/task').join('\n')}`,
-    );
+    let isDir = false;
+    try {
+      isDir = statSync(full).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    if (isDir && name !== 'node_modules') {
+      const found = findBundle(full, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function missing(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('Cannot find module');
+}
+
+if (process.env.VERCEL) {
+  try {
+    require('./vercel-bundle.js');
+  } catch (error) {
+    if (!missing(error)) throw error;
+    const found = findBundle('/var/task');
+    if (!found) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}\n${listTaskFiles('/var/task').join('\n')}`,
+      );
+    }
+    require(found);
   }
 } else {
   require('./local-bootstrap');

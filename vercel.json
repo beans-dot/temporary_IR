@@ -4,7 +4,7 @@
     "backend": {
       "root": "backend",
       "framework": "nestjs",
-      "buildCommand": "npm run build && npx ncc build dist/local-bootstrap.js -o vercel-bundle"
+      "buildCommand": "npm run build && npx ncc build dist/local-bootstrap.js -o vercel-bundle && node scripts/stage-vercel-bundle.js"
     },
     "frontend": {
       "root": "frontend",
