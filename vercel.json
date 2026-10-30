@@ -3,7 +3,15 @@
   "services": {
     "backend": {
       "root": "backend",
-      "framework": "nestjs"
+      "framework": "nestjs",
+      "functions": {
+        "src/main.ts": {
+          "includeFiles": "node_modules/**"
+        },
+        "dist/main.js": {
+          "includeFiles": "node_modules/**"
+        }
+      }
     },
     "frontend": {
       "root": "frontend",
