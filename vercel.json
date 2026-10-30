@@ -3,7 +3,7 @@
   "services": {
     "backend": {
       "root": "backend",
-      "framework": "nestjs",
+      "framework": null,
       "entrypoint": "vercel-bundle/index.js",
       "buildCommand": "npm run build && npx ncc build dist/main.js -o vercel-bundle"
     },
