@@ -8,15 +8,34 @@ function remoteHost(host: string | undefined): boolean {
 }
 
 /**
- * Vercel에는 로컬 PostgreSQL이 없다.
- * DATABASE_URL / POSTGRES_URL / STORAGE_URL 이 있으면 그 접속을 쓰고, 원격 호스트는 SSL을 켠다.
+ * 풀러 주소는 서버리스 풀용이다. Nest가 스키마를 맞추는 동안에는 직접 연결이 낫다.
+ * 주소의 sslmode=require 는 pg가 인증서를 끝까지 검사하게 만들어 접속이 멈춘다.
  */
-export function buildPostgresOptions(): DataSourceOptions {
-  const url =
+function remoteConnectionUrl(): string {
+  const raw =
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL_NON_POOLING ||
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
     process.env.STORAGE_URL ||
     '';
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.delete('sslmode');
+    parsed.searchParams.delete('channel_binding');
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Vercel에는 로컬 PostgreSQL이 없다.
+ * 원격 주소가 있으면 그 접속을 쓰고, 원격 호스트는 SSL을 켠다.
+ */
+export function buildPostgresOptions(): DataSourceOptions {
+  const url = remoteConnectionUrl();
   const host = process.env.DB_HOST || 'localhost';
   const useSsl =
     process.env.DB_SSL === 'true' ||
@@ -31,7 +50,7 @@ export function buildPostgresOptions(): DataSourceOptions {
     logging: process.env.DB_LOGGING === 'true',
     ssl,
     extra: {
-      connectionTimeoutMillis: 8000,
+      connectionTimeoutMillis: 20000,
       ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
     },
   };
