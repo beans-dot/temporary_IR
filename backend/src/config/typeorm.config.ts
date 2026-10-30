@@ -9,10 +9,14 @@ function remoteHost(host: string | undefined): boolean {
 
 /**
  * Vercel에는 로컬 PostgreSQL이 없다.
- * DATABASE_URL / POSTGRES_URL 이 있으면 그 접속을 쓰고, 원격 호스트는 SSL을 켠다.
+ * DATABASE_URL / POSTGRES_URL / STORAGE_URL 이 있으면 그 접속을 쓰고, 원격 호스트는 SSL을 켠다.
  */
 export function buildPostgresOptions(): DataSourceOptions {
-  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+  const url =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.STORAGE_URL ||
+    '';
   const host = process.env.DB_HOST || 'localhost';
   const useSsl =
     process.env.DB_SSL === 'true' ||

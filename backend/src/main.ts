@@ -39,7 +39,13 @@ function errorHtml(detail: string): string {
 }
 
 function hasRemoteDatabase(): boolean {
-  if (process.env.DATABASE_URL || process.env.POSTGRES_URL) return true;
+  if (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.STORAGE_URL
+  ) {
+    return true;
+  }
   const host = process.env.DB_HOST;
   if (!host) return false;
   return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
