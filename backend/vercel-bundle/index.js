@@ -1,3 +1,4 @@
+console.log("NCC_BUNDLE_SENTINEL");
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
