@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChartOptionsPanel } from './ChartOptionsPanel';
 import { DualListboxModal } from './DualListboxModal';
 import { PresetManager } from './PresetManager';
-import { RelativeExpandOptions } from './RelativeExpandOptions';
 import { TargetTree } from './TargetTree';
 
 export function FilterControls() {
@@ -100,7 +99,6 @@ export function FilterControls() {
         </div>
 
         <ChartOptionsPanel />
-        <RelativeExpandOptions />
         <PresetManager />
 
         {/* disabled 버튼은 pointer-events가 막히므로 래퍼에 title을 둔다 */}

@@ -12,6 +12,7 @@ import {
 import { useAnalysisStore } from '@/store/AnalysisStoreProvider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { RelativeExpandOptions } from './RelativeExpandOptions';
 
 const TICKS = [0, 25, 50, 75, 100] as const;
 
@@ -183,8 +184,9 @@ export function RelativeComparePanel() {
 
   return (
     <Card>
-      <CardHeader className="space-y-2">
+      <CardHeader className="space-y-3">
         <CardTitle>상대비교</CardTitle>
+        <RelativeExpandOptions idPrefix="rel-panel" />
         <p className="text-xs text-muted-foreground">
           {isInternal
             ? '대학 평균은 항상 표시됩니다. 비교군 평균을 50으로 두고 상대 위치를 나타냅니다. 동점이면 한 점에 모으며, 마우스 오버 시 대상명과 값을 확인할 수 있습니다.'
