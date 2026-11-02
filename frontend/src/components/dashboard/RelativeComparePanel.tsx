@@ -184,9 +184,11 @@ export function RelativeComparePanel() {
 
   return (
     <Card>
-      <CardHeader className="space-y-3">
-        <CardTitle>상대비교</CardTitle>
-        <RelativeExpandOptions idPrefix="rel-panel" />
+      <CardHeader className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>상대비교</CardTitle>
+          <RelativeExpandOptions idPrefix="rel-panel" />
+        </div>
         <p className="text-xs text-muted-foreground">
           {isInternal
             ? '대학 평균은 항상 표시됩니다. 비교군 평균을 50으로 두고 상대 위치를 나타냅니다. 동점이면 한 점에 모으며, 마우스 오버 시 대상명과 값을 확인할 수 있습니다.'
