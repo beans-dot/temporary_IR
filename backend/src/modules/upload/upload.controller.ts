@@ -25,9 +25,15 @@ export class UploadController {
       throw new BadRequestException('업로드된 파일이 없습니다.');
     }
     return this.uploadService.processUpload(file.buffer, {
+      filename: file.originalname,
       overwriteExisting: overwriteExisting === 'true',
       confirmLocked: confirmLocked === 'true',
-      sourceType: sourceType === 'MONITORING' ? 'MONITORING' : 'INTERNAL',
+      sourceType:
+        sourceType === 'MONITORING'
+          ? 'MONITORING'
+          : sourceType === 'INTERNAL'
+            ? 'INTERNAL'
+            : undefined,
     });
   }
 }

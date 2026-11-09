@@ -9,7 +9,6 @@ import { AnnualEventsManager } from '@/components/admin/AnnualEventsManager';
 import { MemberActivityLog } from '@/components/admin/MemberActivityLog';
 import { MemberManager } from '@/components/admin/MemberManager';
 import { OrgManager } from '@/components/admin/OrgManager';
-import { InitialSeedManager } from '@/components/admin/InitialSeedManager';
 import { RawDataCorrection } from '@/components/admin/RawDataCorrection';
 import { SignupApproval } from '@/components/admin/SignupApproval';
 import { StrategicPlanManager } from '@/components/admin/StrategicPlanManager';
@@ -38,8 +37,6 @@ function AdminBody({ menu }: { menu: AdminMenuId }) {
       return <RawDataCorrection />;
     case 'annual':
       return <AnnualEventsManager />;
-    case 'seed-import':
-      return <InitialSeedManager />;
   }
 }
 

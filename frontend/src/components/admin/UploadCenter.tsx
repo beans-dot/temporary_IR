@@ -529,7 +529,7 @@ function buildUploadTemplateWorkbook(
     ],
     [
       '6',
-      '파일을 내려받은 시스템관리의 같은 업로드 영역에 올리세요. 다른 영역의 양식은 자동으로 거부됩니다.',
+      '내려받은 파일은 시스템관리의 데이터 업로드에 올리세요. 엑셀과 같은 항목을 담은 JSON도 올릴 수 있습니다.',
     ],
     [],
     ['중요', '정보공시(ALIMI)는 개별 수정 및 엑셀 업로드가 불가합니다.'],
@@ -613,10 +613,47 @@ function buildUploadTemplateWorkbook(
   return workbook;
 }
 
+function workbookToUploadJson(
+  workbook: XLSX.WorkBook,
+  sourceType: 'INTERNAL' | 'MONITORING',
+) {
+  const rows = workbook.SheetNames.filter((name) =>
+    name.startsWith('업로드양식'),
+  ).flatMap((name) => {
+    const sheet = workbook.Sheets[name];
+    const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: null,
+      raw: true,
+    });
+    return records.map((record) => ({
+      year: record.year,
+      univ_code: record.univ_code == null ? null : String(record.univ_code),
+      dept_code: record.dept_code == null ? null : String(record.dept_code),
+      metric_id: record.metric_id,
+      metric_name:
+        record.metric_name == null ? null : String(record.metric_name),
+      metric_value:
+        record.metric_value == null || record.metric_value === ''
+          ? null
+          : record.metric_value,
+    }));
+  });
+  return { source_type: sourceType, rows };
+}
+
+function downloadTextFile(filename: string, text: string, mime: string) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function buildCodebookWorkbook(
   codebook: UniversityCodebook,
   metricCodebook: MetricCodebook,
-  mode: UploadMode = 'internal',
 ) {
   const internalMetrics = metricCodebook.metrics.filter(
     (m) => m.sourceType === 'INTERNAL',
@@ -713,51 +750,30 @@ function buildCodebookWorkbook(
     { wch: 16 },
   ];
 
-  const metaSheet = XLSX.utils.aoa_to_sheet(
-    mode === 'monitoring'
-      ? [
-          ['항목', '값'],
-          ['생성시각(UTC)', codebook.generatedAt],
-          ['기준연도', codebook.referenceYear],
-          ['모니터링 지표 수', monitoringMetrics.length],
-          [
-            '_ALL_ 자동연결 지표 수',
-            monitoringMetrics.filter((m) => m.officialAllLinked).length,
-          ],
-          [
-            '연성대',
-            `${codebook.yeonsung.univName} (${codebook.yeonsung.univCode}) / 학과 ${codebook.yeonsung.departments.length}개`,
-          ],
-          [],
-          [
-            '안내',
-            '「ALL자동연결」시트에서 대학 전체(_ALL_) 정보공시 자동연결 여부를 확인할 수 있습니다. 자동연결 지표는 정보공시값 우선, 공시값이 없는 연도만 업로드값을 사용합니다. 학과값은 모두 엑셀 입력 대상입니다.',
-          ],
-          [
-            '지표명 안내',
-            '지표 코드북은 현재 DB의 metric_id–metric_name입니다. 지표 DB 빌더에서 이름을 바꾼 뒤에도 이 파일을 다시 받으면 최신 매핑이 들어갑니다. 업로드 시 현재 metric_name을 쓰고, 이름이 겹치면 metric_id를 함께 넣으세요.',
-          ],
-        ]
-      : [
-          ['항목', '값'],
-          ['생성시각(UTC)', codebook.generatedAt],
-          ['기준연도', codebook.referenceYear],
-          ['자체 지표 수', internalMetrics.length],
-          [
-            '연성대',
-            `${codebook.yeonsung.univName} (${codebook.yeonsung.univCode}) / 학과 ${codebook.yeonsung.departments.length}개`,
-          ],
-          [],
-          [
-            '안내',
-            '연성대학교 학과와 자체 지표만 포함합니다. 지표 DB 관리에서 지표명을 바꾼 뒤에는 최신 파일을 다시 받으세요.',
-          ],
-          [
-            '정보공시',
-            '정보공시(ALIMI)는 개별 수정 및 엑셀 업로드가 불가하므로 이 코드북에서 제외합니다.',
-          ],
-        ],
-  );
+  const metaSheet = XLSX.utils.aoa_to_sheet([
+    ['항목', '값'],
+    ['생성시각(UTC)', codebook.generatedAt],
+    ['기준연도', codebook.referenceYear],
+    ['자체 지표 수', internalMetrics.length],
+    ['모니터링 지표 수', monitoringMetrics.length],
+    [
+      '_ALL_ 자동연결 지표 수',
+      monitoringMetrics.filter((m) => m.officialAllLinked).length,
+    ],
+    [
+      '연성대',
+      `${codebook.yeonsung.univName} (${codebook.yeonsung.univCode}) / 학과 ${codebook.yeonsung.departments.length}개`,
+    ],
+    [],
+    [
+      '안내',
+      '자체 지표와 모니터링 지표를 함께 담습니다. 대학 전체(_ALL_) 자동연결 지표는 정보공시값이 우선하고, 공시값이 없는 연도만 업로드값을 사용합니다. 학과값은 모두 파일 입력 대상입니다.',
+    ],
+    [
+      '정보공시',
+      '정보공시(ALIMI)는 개별 수정 및 파일 업로드가 불가하므로 이 코드북에서 제외합니다.',
+    ],
+  ]);
   metaSheet['!cols'] = [{ wch: 28 }, { wch: 90 }];
 
   const ysuDeptSheet = XLSX.utils.aoa_to_sheet([
@@ -787,14 +803,10 @@ function buildCodebookWorkbook(
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, metaSheet, '안내');
-  if (mode === 'monitoring') {
-    XLSX.utils.book_append_sheet(workbook, ysuDeptSheet, '연성대학과목록');
-    XLSX.utils.book_append_sheet(workbook, monitoringLinkSheet, 'ALL자동연결');
-    XLSX.utils.book_append_sheet(workbook, monitoringSheet, '지표코드(모니터링)');
-  } else {
-    XLSX.utils.book_append_sheet(workbook, ysuDeptSheet, '연성대학과목록');
-    XLSX.utils.book_append_sheet(workbook, internalSheet, '지표코드(자체)');
-  }
+  XLSX.utils.book_append_sheet(workbook, ysuDeptSheet, '연성대학과목록');
+  XLSX.utils.book_append_sheet(workbook, internalSheet, '지표코드(자체)');
+  XLSX.utils.book_append_sheet(workbook, monitoringLinkSheet, 'ALL자동연결');
+  XLSX.utils.book_append_sheet(workbook, monitoringSheet, '지표코드(모니터링)');
   return workbook;
 }
 
@@ -804,18 +816,17 @@ export function UploadCenter() {
       <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
-          정보공시(ALIMI)는 개별 수정 및 엑셀 업로드가 불가하며 대학알리미
-          연동으로만 갱신됩니다. 아래 자체 데이터와 모니터링 업로드 영역은 서로
-          분리되어 있습니다.
+          정보공시(ALIMI)는 개별 수정 및 파일 업로드가 불가하며 대학알리미
+          연동으로만 갱신됩니다. 자체 데이터와 모니터링 데이터는 아래 한
+          화면에서 엑셀 또는 JSON으로 등록합니다.
         </p>
       </div>
-      <ExcelUploadPanel mode="internal" />
-      <ExcelUploadPanel mode="monitoring" />
+      <ExcelUploadPanel />
     </div>
   );
 }
 
-function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
+function ExcelUploadPanel() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<UploadResult | null>(null);
@@ -826,6 +837,7 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
     null,
   );
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const [templateFormat, setTemplateFormat] = useState<'xlsx' | 'json'>('xlsx');
   const [codebookOpen, setCodebookOpen] = useState(false);
   const [codebook, setCodebook] = useState<UniversityCodebook | null>(null);
   const [metricCodebook, setMetricCodebook] = useState<MetricCodebook | null>(
@@ -847,7 +859,6 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
         params: {
           overwriteExisting: overwriteExisting ? 'true' : 'false',
           confirmLocked: opts.confirmLocked ? 'true' : 'false',
-          sourceType: mode === 'monitoring' ? 'MONITORING' : 'INTERNAL',
         },
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -877,17 +888,19 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
         fetchUnivCodebook(),
         fetchMetricCodebook(),
       ]);
+      const templateMode: UploadMode =
+        kind === 'internal-competitiveness' ? 'internal' : 'monitoring';
       const wb = buildUploadTemplateWorkbook(
         univ,
         metrics.metrics,
         kind,
-        mode,
+        templateMode,
       );
       const filenameByKind: Record<TemplateKind, string> = {
-        'internal-competitiveness': `ysu-ir-competitiveness-${univ.referenceYear}.xlsx`,
-        'monitoring-general': `ysu-ir-monitoring-general-${univ.referenceYear}.xlsx`,
-        'monitoring-accounting': `ysu-ir-monitoring-accounting-${univ.referenceYear}.xlsx`,
-        'monitoring-all': `ysu-ir-monitoring-all-${univ.referenceYear}.xlsx`,
+        'internal-competitiveness': `ysu-ir-competitiveness-${univ.referenceYear}`,
+        'monitoring-general': `ysu-ir-monitoring-general-${univ.referenceYear}`,
+        'monitoring-accounting': `ysu-ir-monitoring-accounting-${univ.referenceYear}`,
+        'monitoring-all': `ysu-ir-monitoring-all-${univ.referenceYear}`,
       };
       const summaryByKind: Record<TemplateKind, string> = {
         'internal-competitiveness': '학과별 자체 경쟁력 분석 자료 양식',
@@ -895,10 +908,22 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
         'monitoring-accounting': '회계 현황 자료 양식',
         'monitoring-all': '모니터링 통합 자료 양식',
       };
-      const filename = filenameByKind[kind];
-      XLSX.writeFile(wb, filename);
+      const filename = `${filenameByKind[kind]}.${templateFormat}`;
+      if (templateFormat === 'json') {
+        const payload = workbookToUploadJson(
+          wb,
+          templateMode === 'monitoring' ? 'MONITORING' : 'INTERNAL',
+        );
+        downloadTextFile(
+          filename,
+          JSON.stringify(payload, null, 2),
+          'application/json',
+        );
+      } else {
+        XLSX.writeFile(wb, filename);
+      }
       logDataExport({
-        format: 'xlsx',
+        format: templateFormat,
         source: 'upload-template',
         filename,
         summary: summaryByKind[kind],
@@ -918,18 +943,14 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
         fetchUnivCodebook(),
         fetchMetricCodebook(),
       ]);
-      const wb = buildCodebookWorkbook(univ, metrics, mode);
-      const filename =
-        mode === 'monitoring'
-          ? `ysu-ir-monitoring-codebook-${univ.referenceYear}.xlsx`
-          : `ysu-ir-codebook-${univ.referenceYear}.xlsx`;
+      const wb = buildCodebookWorkbook(univ, metrics);
+      const filename = `ysu-ir-codebook-${univ.referenceYear}.xlsx`;
       XLSX.writeFile(wb, filename);
       logDataExport({
         format: 'xlsx',
         source: 'upload-codebook',
         filename,
-        summary:
-          mode === 'monitoring' ? '모니터링 코드북' : '자체 데이터 코드북',
+        summary: '자체·모니터링 코드북',
       });
     } catch {
       setError('코드북 다운로드 실패');
@@ -1027,63 +1048,33 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
     metricCodebook?.metrics.filter(
       (m) => m.sourceType === 'MONITORING' && m.officialAllLinked,
     ).length ?? 0;
-  const isMonitoring = mode === 'monitoring';
-
   return (
     <Card>
       <CardHeader>
-        <CardTitle>
-          {isMonitoring
-            ? '모니터링 데이터 업로드'
-            : '자체 데이터 엑셀 업로드'}
-        </CardTitle>
+        <CardTitle>데이터 업로드</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2 text-sm text-muted-foreground">
           <p>
-            헤더:{' '}
-            <code>
-              year, univ_code, dept_code, metric_name, metric_value
-            </code>
+            학과별 자체 경쟁력(<code>INTERNAL</code>)과 대학 주요 현황
+            모니터링(<code>MONITORING</code>)을 한곳에서 올립니다. 엑셀
+            양식의 출처에 맞는 지표만 들어가고, JSON은{' '}
+            <code>source_type</code>이 있으면 그 출처로, 없으면 행의{' '}
+            <code>metric_id</code>·지표명으로 연결합니다.
           </p>
-          {isMonitoring ? (
-            <>
-              <p>
-                대학 주요 현황 모니터링 전용입니다. 이 영역에서 받은 파일은{' '}
-                <code>MONITORING</code> 데이터만 등록하며 competitiveness의 자체
-                데이터와 섞이지 않습니다.
-              </p>
-              <p>
-                양식 다운로드에서 <strong>대학 주요 현황</strong>,{' '}
-                <strong>회계 현황</strong>, <strong>통합 양식</strong> 중 업무를
-                선택하세요. 시스템이 대학 전체·학과별 입력 행을 미리 구성합니다.
-              </p>
-              <p>
-                사용자는 <code>metric_value</code>만 입력합니다. 지표명 오타나
-                띄어쓰기 차이는 신규 지표로 생성하지 않으며 업로드를 중단하고
-                유사한 기존 지표를 안내합니다.
-              </p>
-              <p>
-                다운로드 양식의 <strong>ALL자동연결</strong> 시트와{' '}
-                <strong>지표코드(모니터링)</strong> 시트에서 대학 전체값의
-                정보공시 자동연결 여부를 확인할 수 있습니다. 자동연결 항목도
-                학과값은 엑셀로 입력해야 합니다.
-              </p>
-            </>
-          ) : (
-            <>
-              <p>
-                competitiveness의 학과별 자체 경쟁력 분석 전용입니다. 이 영역에서
-                받은 파일은 <code>INTERNAL</code> 데이터만 등록하며 모니터링
-                데이터와 섞이지 않습니다.
-              </p>
-              <p>
-                시스템이 현재 지표와 학과를 양식에 미리 채웁니다. 사용자는{' '}
-                <code>metric_value</code>만 입력하세요. 신규 지표는 엑셀에서 만들지
-                않으며, 지표 DB 관리에서 먼저 등록한 뒤 최신 양식을 받아야 합니다.
-              </p>
-            </>
-          )}
+          <p>
+            공통 항목:{' '}
+            <code>
+              year, univ_code, dept_code, metric_id, metric_name, metric_value
+            </code>
+            . 값은 <code>metric_value</code>만 입력하면 됩니다. 비어 있거나{' '}
+            <code>null</code>인 행은 건너뜁니다.
+          </p>
+          <p>
+            JSON은 행 배열이거나{' '}
+            <code>{'{ "source_type": "INTERNAL", "rows": [ ... ] }'}</code>{' '}
+            형식입니다. 지표명 오타로 새 지표를 만들지 않습니다.
+          </p>
         </div>
 
         <div className="rounded-md border bg-muted/30 p-3">
@@ -1110,17 +1101,12 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
               <span className="mx-1">(자동 입력)</span>— 기존 지표를 정확히
               연결합니다. 내려받은 값을 바꾸지 마세요.
             </li>
-            {isMonitoring && (
-              <>
-                <li>
-                  <span className="font-bold text-foreground">
-                    안내 열
-                  </span>
-                  <span className="mx-1">(표시용)</span>— 단위, 회계 구분,
-                  모니터링 화면 매칭, 입력 안내는 업로드 시 저장되지 않습니다.
-                </li>
-              </>
-            )}
+            <li>
+              <span className="font-bold text-foreground">안내 열</span>
+              <span className="mx-1">(표시용)</span>— 단위, 화면 매칭, 입력
+              안내는 업로드 시 저장되지 않습니다. 모니터링 대학 전체값 중
+              정보공시 자동연결 항목은 공시값이 우선합니다.
+            </li>
           </ul>
         </div>
 
@@ -1149,7 +1135,7 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
           <input
             ref={fileRef}
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx,.xls,.json,application/json"
             onChange={(e) => {
               setFile(e.target.files?.[0] ?? null);
               setResult(null);
@@ -1162,17 +1148,17 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
           </Button>
           <div className="flex items-center gap-2">
             <Switch
-              id={`${mode}-overwrite`}
+              id="upload-overwrite"
               checked={overwriteExisting}
               onCheckedChange={setOverwriteExisting}
               disabled={busy}
             />
-            <Label htmlFor={`${mode}-overwrite`}>기존 데이터 수정</Label>
+            <Label htmlFor="upload-overwrite">기존 데이터 수정</Label>
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
           {overwriteExisting
-            ? '켜짐: 연도·대학·학과·지표명이 같은 기존 값을 엑셀 값으로 바꿉니다.'
+            ? '켜짐: 연도·대학·학과·지표가 같은 기존 값을 파일 값으로 바꿉니다.'
             : '꺼짐: 중복은 건너뛰고, 아직 없는 데이터만 넣습니다.'}
         </p>
 
@@ -1238,93 +1224,105 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
       </CardContent>
 
       <Dialog open={templatePickerOpen} onOpenChange={setTemplatePickerOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
           <DialogHeader>
             <DialogTitle>양식 다운로드</DialogTitle>
             <DialogDescription>
-              입력하려는 업무를 선택하세요. 대학·학과 범위와 시스템 코드는
-              양식이 자동으로 구성합니다.
+              파일 형식과 업무를 선택하세요. 대학·학과 범위와 시스템 코드는
+              양식이 자동으로 구성하고, 값은 metric_value만 채우면 됩니다.
             </DialogDescription>
           </DialogHeader>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={templateFormat === 'xlsx' ? 'default' : 'outline'}
+              onClick={() => setTemplateFormat('xlsx')}
+            >
+              엑셀
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={templateFormat === 'json' ? 'default' : 'outline'}
+              onClick={() => setTemplateFormat('json')}
+            >
+              JSON
+            </Button>
+          </div>
           <div className="grid gap-3">
-            {!isMonitoring ? (
-              <button
-                type="button"
-                className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
-                disabled={!!downloading}
-                onClick={() =>
-                  void handleDownloadTemplate('internal-competitiveness')
-                }
-              >
-                <School className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                <span>
-                  <span className="block font-bold text-foreground">
-                    학과별 자체 경쟁력 분석 자료
-                  </span>
-                  <span className="mt-1 block text-sm text-muted-foreground">
-                    competitiveness 화면에 반영됩니다. 현재 자체 지표와 연성대
-                    학과를 미리 채우며 값만 입력합니다.
-                  </span>
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
+              disabled={!!downloading}
+              onClick={() =>
+                void handleDownloadTemplate('internal-competitiveness')
+              }
+            >
+              <School className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+              <span>
+                <span className="block font-bold text-foreground">
+                  학과별 자체 경쟁력 분석 자료
                 </span>
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
-                  disabled={!!downloading}
-                  onClick={() =>
-                    void handleDownloadTemplate('monitoring-general')
-                  }
-                >
-                  <School className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                  <span>
-                    <span className="block font-bold text-foreground">
-                      대학 주요 현황 자료
-                    </span>
-                    <span className="mt-1 block text-sm text-muted-foreground">
-                      학생·입학·취업·교원 등 회계를 제외한 monitoring 항목을
-                      입력합니다.
-                    </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
-                  disabled={!!downloading}
-                  onClick={() =>
-                    void handleDownloadTemplate('monitoring-accounting')
-                  }
-                >
-                  <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                  <span>
-                    <span className="block font-bold text-foreground">
-                      회계 현황 자료
-                    </span>
-                    <span className="mt-1 block text-sm text-muted-foreground">
-                      교비·법인·산학협력단 회계의 수입·지출 세부항목 금액을
-                      입력합니다.
-                    </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
-                  disabled={!!downloading}
-                  onClick={() => void handleDownloadTemplate('monitoring-all')}
-                >
-                  <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-                  <span>
-                    <span className="block font-bold text-foreground">
-                      모니터링 통합 양식
-                    </span>
-                    <span className="mt-1 block text-sm text-muted-foreground">
-                      일반현황과 회계를 한 파일의 두 입력 탭에서 함께 작성합니다.
-                    </span>
-                  </span>
-                </button>
-              </>
-            )}
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  competitiveness 화면에 반영됩니다. 현재 자체 지표와 연성대
+                  학과를 미리 채우며 값만 입력합니다.
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
+              disabled={!!downloading}
+              onClick={() => void handleDownloadTemplate('monitoring-general')}
+            >
+              <School className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+              <span>
+                <span className="block font-bold text-foreground">
+                  대학 주요 현황 자료
+                </span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  학생·입학·취업·교원 등 회계를 제외한 monitoring 항목을
+                  입력합니다.
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
+              disabled={!!downloading}
+              onClick={() =>
+                void handleDownloadTemplate('monitoring-accounting')
+              }
+            >
+              <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+              <span>
+                <span className="block font-bold text-foreground">
+                  회계 현황 자료
+                </span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  교비·법인·산학협력단 회계의 수입·지출 세부항목 금액을
+                  입력합니다.
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              className="flex items-start gap-3 rounded-md border p-4 text-left transition-colors hover:bg-accent"
+              disabled={!!downloading}
+              onClick={() => void handleDownloadTemplate('monitoring-all')}
+            >
+              <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+              <span>
+                <span className="block font-bold text-foreground">
+                  모니터링 통합 양식
+                </span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  일반현황과 회계를 함께 작성합니다. JSON은 한 배열로
+                  내려받습니다.
+                </span>
+              </span>
+            </button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1332,21 +1330,14 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
       <Dialog open={codebookOpen} onOpenChange={setCodebookOpen}>
         <DialogContent className="max-h-[85vh] max-w-4xl overflow-hidden">
           <DialogHeader>
-            <DialogTitle>
-              {isMonitoring
-                ? '연성대 모니터링 코드북'
-                : '연성대 자체 데이터 코드북'}
-            </DialogTitle>
+            <DialogTitle>연성대 데이터 코드북</DialogTitle>
             <DialogDescription>
-              {isMonitoring
-                ? '연성대학교 학과와 모니터링 지표만 보여 줍니다. 실제 입력 양식에는 지표가 자동으로 들어갑니다.'
-                : '연성대학교 학과와 자체 지표만 보여 줍니다. 정보공시 지표는 업로드 대상에서 제외됩니다.'}
+              연성대학교 학과, 자체 지표, 모니터링 지표를 보여 줍니다. 정보공시
+              지표는 업로드 대상에서 제외됩니다.
               {codebook && metricCodebook && (
                 <>
                   {' '}
-                  {isMonitoring
-                    ? `기준연도 ${codebook.referenceYear} · 연성대 학과 ${codebook.yeonsung.departments.length} · 모니터링 ${monitoringCount} · _ALL_ 자동연결 ${monitoringOfficialCount}`
-                    : `기준연도 ${codebook.referenceYear} · 연성대 학과 ${codebook.yeonsung.departments.length} · 자체 ${internalCount}`}
+                  {`기준연도 ${codebook.referenceYear} · 연성대 학과 ${codebook.yeonsung.departments.length} · 자체 ${internalCount} · 모니터링 ${monitoringCount} · _ALL_ 자동연결 ${monitoringOfficialCount}`}
                 </>
               )}
             </DialogDescription>
@@ -1360,28 +1351,24 @@ function ExcelUploadPanel({ mode }: { mode: UploadMode }) {
             >
               연성대 학과
             </Button>
-            {!isMonitoring && (
-              <Button
-                size="sm"
-                variant={
-                  codebookTab === 'metric-internal' ? 'default' : 'outline'
-                }
-                onClick={() => setCodebookTab('metric-internal')}
-              >
-                지표(자체)
-              </Button>
-            )}
-            {isMonitoring && (
-              <Button
-                size="sm"
-                variant={
-                  codebookTab === 'metric-monitoring' ? 'default' : 'outline'
-                }
-                onClick={() => setCodebookTab('metric-monitoring')}
-              >
-                지표(모니터링)
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant={
+                codebookTab === 'metric-internal' ? 'default' : 'outline'
+              }
+              onClick={() => setCodebookTab('metric-internal')}
+            >
+              지표(자체)
+            </Button>
+            <Button
+              size="sm"
+              variant={
+                codebookTab === 'metric-monitoring' ? 'default' : 'outline'
+              }
+              onClick={() => setCodebookTab('metric-monitoring')}
+            >
+              지표(모니터링)
+            </Button>
             <div className="relative min-w-[200px] flex-1">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input

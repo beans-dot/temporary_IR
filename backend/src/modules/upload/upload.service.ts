@@ -18,10 +18,12 @@ import {
 } from '../metrics/metric-labels';
 
 export interface UploadOptions {
-  /** 켜면 중복(year+univ+dept+metric)을 엑셀 값으로 덮어쓴다. 끄면 중복만 건너뛴다. */
+  /** 켜면 중복(year+univ+dept+metric)을 파일 값으로 덮어쓴다. 끄면 중복만 건너뛴다. */
   overwriteExisting?: boolean;
   confirmLocked?: boolean;
+  /** 없으면 파일의 출처를 쓰고, 파일에도 없으면 행마다 지표를 찾는다. */
   sourceType?: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>;
+  filename?: string;
 }
 
 /** 양식에서 인식하는 헤더. univ_name·dept_name 등 표시용 더미 열은 무시한다. */
@@ -50,6 +52,13 @@ interface ParsedRowInput {
 
 interface ParsedRow extends ParsedRowInput {
   metricId: number;
+  sourceType: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>;
+}
+
+interface ParsedUpload {
+  rows: ParsedRowInput[];
+  /** null이면 행마다 자체·모니터링 지표를 모두 찾아 연결한다. */
+  sourceType: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'> | null;
 }
 
 interface TemplateMetadata {
@@ -184,6 +193,14 @@ async function withoutCommentParts(buffer: Buffer): Promise<Buffer> {
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 
+function isJsonUpload(buffer: Buffer, filename?: string): boolean {
+  const name = (filename ?? '').toLowerCase();
+  if (name.endsWith('.json')) return true;
+  if (name.endsWith('.xlsx') || name.endsWith('.xls')) return false;
+  const start = buffer.subarray(0, 64).toString('utf8').trimStart();
+  return start.startsWith('{') || start.startsWith('[');
+}
+
 async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
   const open = async (data: Buffer) => {
     const workbook = new ExcelJS.Workbook();
@@ -315,39 +332,48 @@ export class UploadService {
     };
   }
 
+  private resolveDeclaredSourceType(
+    declared: string | undefined,
+    requested?: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>,
+    targetPage?: string,
+  ): Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'> | null {
+    if (declared === 'ALIMI') {
+      throw new BadRequestException(
+        '정보공시(ALIMI)는 개별 수정 및 파일 업로드가 불가합니다. 대학알리미 연동으로만 갱신하세요.',
+      );
+    }
+    const normalized =
+      declared === 'INTERNAL' || declared === 'MONITORING' ? declared : undefined;
+    if (declared && !normalized) {
+      throw new BadRequestException(
+        `지원하지 않는 출처 '${declared}'입니다. INTERNAL 또는 MONITORING만 업로드할 수 있습니다.`,
+      );
+    }
+    if (normalized && requested && normalized !== requested) {
+      const expectedLabel = requested === 'MONITORING' ? '모니터링' : '자체 데이터';
+      const actualLabel = normalized === 'MONITORING' ? '모니터링' : '자체 데이터';
+      throw new BadRequestException(
+        `이 파일은 ${actualLabel}용입니다${targetPage ? ` (${targetPage})` : ''}. 요청한 출처(${expectedLabel})와 다릅니다.`,
+      );
+    }
+    return normalized ?? requested ?? null;
+  }
+
   private async parseWorkbook(
     buffer: Buffer,
-    expectedSourceType: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>,
-  ): Promise<ParsedRowInput[]> {
+    requestedSourceType?: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>,
+  ): Promise<ParsedUpload> {
     const workbook = await loadWorkbook(buffer);
     const firstSheet = workbook.worksheets[0];
     if (!firstSheet) {
       throw new BadRequestException('엑셀 시트를 찾을 수 없습니다.');
     }
     const metadata = this.readTemplateMetadata(workbook);
-    if (metadata.sourceType === 'ALIMI') {
-      throw new BadRequestException(
-        '정보공시(ALIMI)는 개별 수정 및 엑셀 업로드가 불가합니다. 대학알리미 연동으로만 갱신하세요.',
-      );
-    }
-    if (
-      metadata.sourceType &&
-      metadata.sourceType !== expectedSourceType
-    ) {
-      const expectedLabel =
-        expectedSourceType === 'MONITORING'
-          ? '모니터링 데이터 업로드'
-          : '자체 데이터 엑셀 업로드';
-      const actualLabel =
-        metadata.sourceType === 'MONITORING'
-          ? '모니터링'
-          : metadata.sourceType === 'INTERNAL'
-            ? '자체 데이터'
-            : metadata.sourceType;
-      throw new BadRequestException(
-        `이 파일은 ${actualLabel}용 양식입니다${metadata.targetPage ? ` (${metadata.targetPage})` : ''}. ${expectedLabel} 영역에는 등록할 수 없습니다.`,
-      );
-    }
+    const sourceType = this.resolveDeclaredSourceType(
+      metadata.sourceType,
+      requestedSourceType,
+      metadata.targetPage,
+    );
     const namedUploadSheets = workbook.worksheets.filter((sheet) =>
       sheet.name.trim().startsWith('업로드양식'),
     );
@@ -465,7 +491,133 @@ export class UploadService {
     if (rows.length === 0) {
       throw new BadRequestException('처리할 데이터 행이 없습니다.');
     }
-    return rows;
+    return { rows, sourceType };
+  }
+
+  private readJsonField(
+    record: Record<string, unknown>,
+    keys: string[],
+  ): unknown {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(record, key)) {
+        return record[key];
+      }
+    }
+    return undefined;
+  }
+
+  private parseJsonUpload(
+    buffer: Buffer,
+    requestedSourceType?: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>,
+  ): ParsedUpload {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(buffer.toString('utf8').replace(/^\uFEFF/, ''));
+    } catch {
+      throw new BadRequestException('JSON 형식이 올바르지 않습니다.');
+    }
+
+    let declared: string | undefined;
+    let list: unknown;
+    if (Array.isArray(parsed)) {
+      list = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      const envelope = parsed as Record<string, unknown>;
+      const rawSource = this.readJsonField(envelope, ['source_type', 'sourceType']);
+      if (rawSource != null && this.cellToString(rawSource) !== '') {
+        declared = this.cellToString(rawSource).toUpperCase();
+      }
+      list = this.readJsonField(envelope, ['rows', 'data']);
+    } else {
+      list = undefined;
+    }
+    if (!Array.isArray(list)) {
+      throw new BadRequestException(
+        'JSON은 행 배열이거나 { "source_type", "rows" } 객체여야 합니다.',
+      );
+    }
+
+    const sourceType = this.resolveDeclaredSourceType(
+      declared,
+      requestedSourceType,
+    );
+    const rows: ParsedRowInput[] = [];
+    list.forEach((item, index) => {
+      const rowLocation = `JSON ${index + 1}번째`;
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw new BadRequestException(
+          `[${rowLocation}] 각 행은 객체여야 합니다.`,
+        );
+      }
+      const record = item as Record<string, unknown>;
+      const metricNameRaw = this.readJsonField(record, [
+        'metric_name',
+        'metricName',
+      ]);
+      const metricValueRaw = this.readJsonField(record, [
+        'metric_value',
+        'metricValue',
+      ]);
+      const metricNameBlank = this.cellToString(metricNameRaw) === '';
+      const metricValueBlank =
+        metricValueRaw == null || this.cellToString(metricValueRaw) === '';
+      if (metricNameBlank && metricValueBlank) return;
+      if (metricValueBlank) return;
+
+      const yearRaw = this.requireCell(
+        this.readJsonField(record, ['year']),
+        'year',
+        rowLocation,
+      );
+      const univCode = this.requireCell(
+        this.readJsonField(record, ['univ_code', 'univCode']),
+        'univ_code',
+        rowLocation,
+      );
+      const deptRaw = this.cellToString(
+        this.readJsonField(record, ['dept_code', 'deptCode']),
+      );
+      const metricName = this.requireCell(
+        metricNameRaw,
+        'metric_name',
+        rowLocation,
+      );
+      const metricValue = this.validateValue(metricValueRaw, rowLocation);
+      const year = parseInt(yearRaw, 10);
+      if (!Number.isInteger(year)) {
+        throw new BadRequestException(`[${rowLocation}] year는 정수여야 합니다.`);
+      }
+
+      let metricIdHint: number | undefined;
+      const rawId = this.cellToString(
+        this.readJsonField(record, ['metric_id', 'metricId']),
+      );
+      if (rawId) {
+        const parsedId = Number.parseInt(rawId, 10);
+        if (!Number.isInteger(parsedId)) {
+          throw new BadRequestException(
+            `[${rowLocation}] metric_id는 정수여야 합니다.`,
+          );
+        }
+        metricIdHint = parsedId;
+      }
+
+      rows.push({
+        sheetName: 'JSON',
+        rowNumber: index + 1,
+        year,
+        univCode,
+        deptCode: deptRaw || '_ALL_',
+        metricName,
+        metricValue,
+        metricIdHint,
+      });
+    });
+
+    if (rows.length === 0) {
+      throw new BadRequestException('처리할 데이터 행이 없습니다.');
+    }
+    return { rows, sourceType };
   }
 
   /**
@@ -475,7 +627,7 @@ export class UploadService {
   private async resolveMetricIds(
     manager: EntityManager,
     inputs: ParsedRowInput[],
-    sourceType: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'>,
+    sourceType: Extract<MetricSourceType, 'INTERNAL' | 'MONITORING'> | null,
   ): Promise<{
     rows: ParsedRow[];
     metricsCreated: number;
@@ -488,7 +640,12 @@ export class UploadService {
         inputs.filter((r) => r.metricIdHint == null).map((r) => r.metricName),
       ),
     );
-    const sourceMetrics = await metricRepo.find({ where: { sourceType } });
+    const allowedSourceTypes = sourceType
+      ? [sourceType]
+      : (['INTERNAL', 'MONITORING'] as const);
+    const sourceMetrics = await metricRepo.find({
+      where: { sourceType: In([...allowedSourceTypes]) },
+    });
 
     const hintedIds = Array.from(
       new Set(
@@ -546,12 +703,12 @@ export class UploadService {
         .map((candidate) => candidate.name);
     };
 
-    const nameToId = new Map<string, number>();
+    const nameToMetric = new Map<string, IrMetricRegistry>();
 
     for (const name of uniqueNames) {
       const found = findMatch(name);
       if (found) {
-        nameToId.set(name, found.metricId);
+        nameToMetric.set(name, found);
         continue;
       }
       const row = inputs.find(
@@ -573,14 +730,21 @@ export class UploadService {
         }
         if (hintedMetric.sourceType === 'ALIMI') {
           throw new BadRequestException(
-            `[${formatRowLocation(r)}] 정보공시(ALIMI) 지표는 개별 수정 및 엑셀 업로드가 불가합니다.`,
+            `[${formatRowLocation(r)}] 정보공시(ALIMI) 지표는 개별 수정 및 파일 업로드가 불가합니다.`,
           );
         }
-        if (hintedMetric.sourceType !== sourceType) {
-          const expectedLabel =
-            sourceType === 'MONITORING' ? '모니터링' : '자체 데이터';
+        if (
+          hintedMetric.sourceType !== 'INTERNAL' &&
+          hintedMetric.sourceType !== 'MONITORING'
+        ) {
           throw new BadRequestException(
-            `[${formatRowLocation(r)}] metric_id ${r.metricIdHint}는 ${expectedLabel} 지표가 아닙니다. 올바른 업로드 영역을 이용하세요.`,
+            `[${formatRowLocation(r)}] metric_id ${r.metricIdHint}는 업로드할 수 없는 지표입니다.`,
+          );
+        }
+        if (sourceType && hintedMetric.sourceType !== sourceType) {
+          const fileLabel = sourceType === 'MONITORING' ? '모니터링' : '자체 데이터';
+          throw new BadRequestException(
+            `[${formatRowLocation(r)}] metric_id ${r.metricIdHint}는 ${fileLabel} 지표가 아닙니다.`,
           );
         }
         if (
@@ -592,9 +756,21 @@ export class UploadService {
             `[${formatRowLocation(r)}] metric_id ${r.metricIdHint}는 '${hintedMetric.metricName}' 지표입니다. 입력된 지표명 '${r.metricName}'과 일치하지 않습니다. 최신 양식을 다시 받아 주세요.`,
           );
         }
-        return { ...r, metricId: hintedMetric.metricId };
+        return {
+          ...r,
+          metricId: hintedMetric.metricId,
+          sourceType: hintedMetric.sourceType,
+        };
       }
-      return { ...r, metricId: nameToId.get(r.metricName)! };
+      const matched = nameToMetric.get(r.metricName)!;
+      return {
+        ...r,
+        metricId: matched.metricId,
+        sourceType: matched.sourceType as Extract<
+          MetricSourceType,
+          'INTERNAL' | 'MONITORING'
+        >,
+      };
     });
 
     return { rows, metricsCreated: 0, createdMetricIds: [] };
@@ -698,15 +874,22 @@ export class UploadService {
     buffer: Buffer,
     options: UploadOptions,
   ): Promise<UploadResult> {
-    const sourceType =
-      options.sourceType === 'MONITORING' ? 'MONITORING' : 'INTERNAL';
-    const inputs = await this.parseWorkbook(buffer, sourceType);
+    const requestedSourceType =
+      options.sourceType === 'MONITORING'
+        ? 'MONITORING'
+        : options.sourceType === 'INTERNAL'
+          ? 'INTERNAL'
+          : undefined;
+    const jsonUpload = isJsonUpload(buffer, options.filename);
+    const parsed = jsonUpload
+      ? this.parseJsonUpload(buffer, requestedSourceType)
+      : await this.parseWorkbook(buffer, requestedSourceType);
 
     return this.dataSource
       .transaction(async (manager) => {
         const rawRepo = manager.getRepository(IrRawData);
         const { rows, metricsCreated, createdMetricIds } =
-          await this.resolveMetricIds(manager, inputs, sourceType);
+          await this.resolveMetricIds(manager, parsed.rows, parsed.sourceType);
 
         const existing = await rawRepo
           .createQueryBuilder('r')
@@ -797,14 +980,22 @@ export class UploadService {
           toApply,
           skipped,
         );
+        const appliedTypes = new Set(
+          (toApply.length > 0 ? toApply : rows).map((row) => row.sourceType),
+        );
         const sourceLabel =
-          sourceType === 'MONITORING' ? '모니터링' : '자체';
+          appliedTypes.size === 1
+            ? appliedTypes.has('MONITORING')
+              ? '모니터링'
+              : '자체'
+            : '자체·모니터링';
+        const formatLabel = jsonUpload ? 'JSON' : '엑셀';
         const skipNote =
           skipped.length > 0 ? `, 건너뜀 ${skipped.length}건` : '';
 
         await manager.getRepository(IrUpdateLog).save({
-          updateType: 'EXCEL_UPLOAD',
-          logText: `${sourceLabel} 데이터 엑셀 업로드 (신규 ${inserted}건, 갱신 ${updated}건${skipNote})`,
+          updateType: jsonUpload ? 'JSON_UPLOAD' : 'EXCEL_UPLOAD',
+          logText: `${sourceLabel} 데이터 ${formatLabel} 업로드 (신규 ${inserted}건, 갱신 ${updated}건${skipNote})`,
           detail,
         });
 

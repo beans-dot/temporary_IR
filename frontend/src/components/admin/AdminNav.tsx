@@ -14,8 +14,7 @@ export type AdminMenuId =
   | 'alimi'
   | 'upload'
   | 'correction'
-  | 'annual'
-  | 'seed-import';
+  | 'annual';
 
 interface NavLeaf {
   id: AdminMenuId;
@@ -55,7 +54,6 @@ const NAV: NavGroup[] = [
       { id: 'upload', label: '엑셀 업로드' },
       { id: 'correction', label: '자체 데이터 교정' },
       { id: 'annual', label: '연간 변동사항 관리' },
-      { id: 'seed-import', label: '초기시딩(임시)' },
     ],
   },
 ];
@@ -71,7 +69,6 @@ export const ADMIN_MENU_TITLES: Record<AdminMenuId, string> = {
   upload: '엑셀 업로드',
   correction: '자체 데이터 교정',
   annual: '연간 변동사항 관리',
-  'seed-import': '초기시딩(임시)',
 };
 
 function groupContains(group: NavGroup, menu: AdminMenuId) {

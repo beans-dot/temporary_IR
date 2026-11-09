@@ -142,7 +142,12 @@ export class UsersService {
     ip?: string | null;
   }) {
     const format = input.format;
-    if (format !== 'xlsx' && format !== 'png' && format !== 'pdf') {
+    if (
+      format !== 'xlsx' &&
+      format !== 'png' &&
+      format !== 'pdf' &&
+      format !== 'json'
+    ) {
       throw new BadRequestException('지원하지 않는 내보내기 형식입니다.');
     }
     const source = input.source.trim();
