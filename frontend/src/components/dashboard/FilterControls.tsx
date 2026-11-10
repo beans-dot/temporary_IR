@@ -1,7 +1,7 @@
 'use client';
 
 import { RotateCcw, Search } from 'lucide-react';
-import { MIN_AVAILABLE_YEAR } from '@/store/useDashboardStore';
+import { minAvailableYear } from '@/store/useDashboardStore';
 import { useAnalysisStore } from '@/store/AnalysisStoreProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,8 +22,9 @@ export function FilterControls() {
   const relativeExpand = useAnalysisStore((s) => s.relativeExpand);
 
   const currentYear = new Date().getFullYear();
+  const minYear = minAvailableYear(analysisScope);
   const yearOptions = Array.from(
-    { length: currentYear - MIN_AVAILABLE_YEAR + 1 },
+    { length: currentYear - minYear + 1 },
     (_, i) => currentYear - i,
   );
 

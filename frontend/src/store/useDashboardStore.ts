@@ -106,17 +106,24 @@ export interface DashboardState {
   serialize: () => Record<string, unknown>;
 }
 
-/** 2022년 및 이전 데이터는 현재 조회 불가 */
+/** 공시 화면은 2023년부터, 자체 경쟁력은 2020년부터 조회한다. */
 export const MIN_AVAILABLE_YEAR = 2023;
+export const MIN_INTERNAL_YEAR = 2020;
 
-const currentYear = new Date().getFullYear();
-const defaultYears = [0, 1, 2, 3, 4]
-  .map((o) => currentYear - o)
-  .filter((y) => y >= MIN_AVAILABLE_YEAR)
-  .sort((a, b) => a - b);
+export function minAvailableYear(scope: AnalysisScope): number {
+  return scope === 'internal' ? MIN_INTERNAL_YEAR : MIN_AVAILABLE_YEAR;
+}
 
-function filterAvailableYears(years: number[]): number[] {
-  return [...years].filter((y) => y >= MIN_AVAILABLE_YEAR).sort((a, b) => a - b);
+function defaultYearsFor(minYear: number): number[] {
+  const currentYear = new Date().getFullYear();
+  return [0, 1, 2, 3, 4]
+    .map((offset) => currentYear - offset)
+    .filter((year) => year >= minYear)
+    .sort((a, b) => a - b);
+}
+
+function filterAvailableYears(years: number[], minYear: number): number[] {
+  return [...years].filter((year) => year >= minYear).sort((a, b) => a - b);
 }
 
 function normalizeTarget(t: SelectedTarget): SelectedTarget {
@@ -220,12 +227,13 @@ async function fetchInternalRelativeScales(
 }
 
 export function createAnalysisStore(analysisScope: AnalysisScope) {
+  const minYear = minAvailableYear(analysisScope);
   return create<DashboardState>((set, get) => ({
   analysisScope,
   targetTree: [],
   selectedTargets: [],
   selectedMetrics: [],
-  years: defaultYears,
+  years: defaultYearsFor(minYear),
   chartOptions: {
     showDataLabels: false,
     showTrendline: false,
@@ -357,7 +365,7 @@ export function createAnalysisStore(analysisScope: AnalysisScope) {
       pivot: null,
       relativeScales: [],
     }),
-  setYears: (years) => set({ years: filterAvailableYears(years) }),
+  setYears: (years) => set({ years: filterAvailableYears(years, minYear) }),
   deletePreset: async (presetId) => {
     await api.delete(`/presets/${presetId}`);
   },
@@ -487,7 +495,7 @@ export function createAnalysisStore(analysisScope: AnalysisScope) {
     set((s) => ({
       selectedTargets: (state.selectedTargets ?? []).map(normalizeTarget),
       selectedMetrics: state.selectedMetrics,
-      years: filterAvailableYears(state.years ?? []),
+      years: filterAvailableYears(state.years ?? [], minYear),
       chartOptions: state.chartOptions
         ? { ...s.chartOptions, ...state.chartOptions }
         : s.chartOptions,
