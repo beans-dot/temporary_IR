@@ -3,6 +3,7 @@
 import { AuthGuard } from '@/components/auth/AuthGuard';
 import { FilterControls } from '@/components/dashboard/FilterControls';
 import { HybridChart } from '@/components/dashboard/HybridChart';
+import { DescriptiveStatsGrid } from '@/components/dashboard/DescriptiveStatsGrid';
 import { PivotDataGrid } from '@/components/dashboard/PivotDataGrid';
 import { RelativeComparePanel } from '@/components/dashboard/RelativeComparePanel';
 import { AnalysisStoreProvider } from '@/store/AnalysisStoreProvider';
@@ -22,6 +23,7 @@ export default function CompetitivenessPage() {
               <HybridChart />
               <RelativeComparePanel />
               <PivotDataGrid />
+              <DescriptiveStatsGrid />
             </div>
           </div>
         </div>

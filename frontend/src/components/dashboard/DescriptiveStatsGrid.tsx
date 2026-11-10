@@ -1,0 +1,155 @@
+'use client';
+
+import { useMemo, useRef } from 'react';
+import { usePathname } from 'next/navigation';
+import { FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import {
+  descriptiveStatsFromPivot,
+  type DescriptiveStats,
+} from '@/lib/descriptiveStats';
+import { logDataExport } from '@/lib/exportLog';
+import { useAnalysisStore } from '@/store/AnalysisStoreProvider';
+import { Button } from '@/components/ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+
+const COLUMNS: Array<{
+  key: keyof DescriptiveStats;
+  label: string;
+}> = [
+  { key: 'mean', label: '평균(Mean)' },
+  { key: 'median', label: '중앙값(Median)' },
+  { key: 'modes', label: '최빈값(Mode)' },
+  { key: 'variance', label: '분산(Variance)' },
+  { key: 'standardDeviation', label: '표준편차(Standard Deviation)' },
+  { key: 'range', label: '범위(Range)' },
+  { key: 'iqr', label: '사분위수(IQR)' },
+  { key: 'skewness', label: '왜도(Skewness)' },
+  { key: 'kurtosis', label: '첨도(Kurtosis)' },
+];
+
+function formatStat(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return '-';
+  return Number(value).toLocaleString('ko-KR', {
+    maximumFractionDigits: 4,
+  });
+}
+
+function formatCell(stats: DescriptiveStats, key: keyof DescriptiveStats): string {
+  if (key === 'modes') {
+    if (!stats.modes || stats.modes.length === 0) return '-';
+    return stats.modes.map((mode) => formatStat(mode)).join(', ');
+  }
+  const value = stats[key];
+  return typeof value === 'number' ? formatStat(value) : '-';
+}
+
+export function DescriptiveStatsGrid() {
+  const pivot = useAnalysisStore((s) => s.pivot);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const pathname = usePathname();
+
+  const rows = useMemo(
+    () => (pivot && pivot.rows.length > 0 ? descriptiveStatsFromPivot(pivot) : []),
+    [pivot],
+  );
+  const hasData = rows.length > 0;
+  const periodLabel = pivot?.years.length ? pivot.years.join(', ') : '';
+
+  const handleExcel = () => {
+    if (!tableRef.current) return;
+    const worksheet = XLSX.utils.table_to_sheet(tableRef.current);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'IR_Descriptive');
+    const filename = `ysu-ir-descriptive-${Date.now()}.xlsx`;
+    XLSX.writeFile(workbook, filename);
+    logDataExport({
+      format: 'xlsx',
+      source: pathname.includes('competitiveness')
+        ? 'competitiveness-descriptive'
+        : 'dashboard-descriptive',
+      filename,
+      summary: pivot
+        ? `기초기술통계 ${rows.length}행 · ${pivot.years.join(', ')}`
+        : undefined,
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader className="flex-row items-start justify-between space-y-0 gap-4">
+        <div className="space-y-1.5">
+          <CardTitle>기초 기술 통계 데이터</CardTitle>
+          <CardDescription>
+            {hasData
+              ? `조회 기간(${periodLabel})의 연도별 값으로 계산합니다. 결측 연도는 제외하고, 분산·표준편차는 표본(n−1), 왜도·첨도는 Excel과 같으며 첨도는 초과첨도, 사분위수는 Q3−Q1입니다. 계산할 수 없으면 -입니다.`
+              : '피벗에 조회된 각 데이터를 조회 기간 기준으로 계산합니다.'}
+          </CardDescription>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExcel}
+          disabled={!hasData}
+          className="shrink-0"
+        >
+          <FileSpreadsheet className="mr-1 h-4 w-4" /> 엑셀 다운로드
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {!hasData ? (
+          <div className="flex h-32 items-center justify-center text-muted-foreground">
+            조회된 데이터가 없습니다.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table ref={tableRef} className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-secondary">
+                  <th className="sticky left-0 z-10 border bg-secondary px-3 py-2 text-left font-bold whitespace-nowrap">
+                    데이터명
+                  </th>
+                  {COLUMNS.map((column) => (
+                    <th
+                      key={column.key}
+                      className="border px-3 py-2 text-right font-bold whitespace-nowrap"
+                    >
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.key}>
+                    <td
+                      className={`sticky left-0 z-10 border bg-card px-3 py-2 whitespace-nowrap ${
+                        row.isYeonsung ? 'font-bold text-primary' : ''
+                      }`}
+                    >
+                      {row.name}
+                    </td>
+                    {COLUMNS.map((column) => (
+                      <td
+                        key={column.key}
+                        className="border px-3 py-2 text-right whitespace-nowrap"
+                      >
+                        {formatCell(row.stats, column.key)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
