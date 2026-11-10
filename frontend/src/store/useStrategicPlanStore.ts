@@ -50,6 +50,15 @@ export const SP_YEAR_VIEWS: SpView[] = [
   'eval-report',
 ];
 
+/** 작성 데이터가 전년도에만 있는 조회·입력 화면 */
+export const SP_WRITTEN_YEAR_VIEWS: SpView[] = [
+  'budget',
+  'eval',
+  'kpi',
+  'settlement',
+  'eval-report',
+];
+
 export const SP_COMPARE_MODES: Array<{ value: SpCompareMode; label: string }> = [
   { value: 'jc', label: '전문대학 내' },
   { value: 'all', label: '전체(4년제 포함)' },
@@ -87,12 +96,99 @@ export function currentAcademicYear(now = new Date()): number {
   return now.getMonth() < 2 ? year - 1 : year;
 }
 
-function defaultYear(years: number[]): number {
-  const current = currentAcademicYear();
-  if (years.length === 0) return current;
-  if (years.includes(current)) return current;
-  const past = years.filter((y) => y <= current);
+/**
+ * 예결산·자체평가·성과지표·결산·결과 조회에 들어갈 자료가 있는 학년도.
+ * yyyy.mm.dd 시점에는 yyyy-1년 자료만 작성되어 있다.
+ */
+export function writtenDataYear(now = new Date()): number {
+  return now.getFullYear() - 1;
+}
+
+function pickListedYear(years: number[], preferred: number): number {
+  if (years.length === 0) return preferred;
+  if (years.includes(preferred)) return preferred;
+  const past = years.filter((y) => y <= preferred);
   return past.length > 0 ? Math.max(...past) : years[0];
+}
+
+function isWrittenYearView(view: SpView) {
+  return SP_WRITTEN_YEAR_VIEWS.includes(view);
+}
+
+/** 화면마다 마지막으로 고른 학년도. 첫 진입 기본값만 다르고, 이후에는 선택을 유지한다. */
+let planYear = currentAcademicYear();
+let recordYear = writtenDataYear();
+let yearLoadId = 0;
+
+function rememberYear(view: SpView, year: number) {
+  if (isWrittenYearView(view)) recordYear = year;
+  else if (view === 'strategy') planYear = year;
+}
+
+function yearForView(view: SpView, fallback: number) {
+  if (isWrittenYearView(view)) return recordYear;
+  if (view === 'strategy') return planYear;
+  return fallback;
+}
+
+type YearStore = {
+  set: (
+    partial: Partial<
+      Pick<
+        StrategicPlanState,
+        | 'year'
+        | 'view'
+        | 'tree'
+        | 'fundSources'
+        | 'entryLoading'
+        | 'saveError'
+        | 'evaluations'
+        | 'budgets'
+        | 'writeLocks'
+      >
+    >,
+  ) => void;
+  get: () => StrategicPlanState;
+};
+
+function beginYearChange(
+  year: number,
+  extra: Partial<Pick<StrategicPlanState, 'view'>> ,
+  store: YearStore,
+) {
+  const changed = store.get().year !== year;
+  store.set({
+    year,
+    ...extra,
+    ...(changed
+      ? {
+          entryLoading: true,
+          saveError: null,
+          evaluations: {},
+          budgets: {},
+          writeLocks: {},
+        }
+      : {}),
+  });
+  if (!changed) return;
+  const loadId = ++yearLoadId;
+  void loadYear(year, loadId, store);
+}
+
+async function loadYear(year: number, loadId: number, store: YearStore) {
+  try {
+    const [tree, fundSources] = await Promise.all([
+      fetchSpTree(year),
+      fetchSpFundSources(false, year),
+    ]);
+    if (loadId !== yearLoadId) return;
+    store.set({ tree, fundSources });
+  } catch {
+    if (loadId !== yearLoadId) return;
+    store.set({ saveError: '해당 학년도 체계를 불러오지 못했습니다.' });
+  }
+  if (loadId !== yearLoadId) return;
+  await store.get().loadEntries(year, loadId);
 }
 
 interface StrategicPlanState {
@@ -118,7 +214,7 @@ interface StrategicPlanState {
   kpiSort: { key: SpKpiSortKey; dir: 1 | -1 };
 
   load: () => Promise<void>;
-  loadEntries: (year: number) => Promise<void>;
+  loadEntries: (year: number, loadId?: number) => Promise<void>;
   setView: (view: SpView) => void;
   setGoalId: (goalId: string) => void;
   setDept: (dept: string) => void;
@@ -178,7 +274,7 @@ export const useStrategicPlanStore = create<StrategicPlanState>((set, get) => ({
   dept: '',
   query: '',
   specializedOnly: false,
-  year: currentAcademicYear(),
+  year: planYear,
   compareMode: 'jc',
   kpiSort: { key: '', dir: 1 },
 
@@ -186,13 +282,16 @@ export const useStrategicPlanStore = create<StrategicPlanState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const latest = await fetchSpTree();
-      const year = defaultYear(latest.years);
+      planYear = pickListedYear(latest.years, currentAcademicYear());
+      recordYear = pickListedYear(latest.years, writtenDataYear());
+      const year = planYear;
       const [tree, fundSources] = await Promise.all([
         fetchSpTree(year),
         fetchSpFundSources(false, year),
       ]);
+      const loadId = ++yearLoadId;
       set({ tree, fundSources, year, loading: false });
-      await get().loadEntries(year);
+      await get().loadEntries(year, loadId);
     } catch {
       set({
         loading: false,
@@ -202,7 +301,8 @@ export const useStrategicPlanStore = create<StrategicPlanState>((set, get) => ({
     }
   },
 
-  loadEntries: async (year) => {
+  loadEntries: async (year, loadId = ++yearLoadId) => {
+    if (loadId !== yearLoadId) return;
     set({ entryLoading: true });
     try {
       const [evaluations, budgets, locks] = await Promise.all([
@@ -210,6 +310,7 @@ export const useStrategicPlanStore = create<StrategicPlanState>((set, get) => ({
         fetchSpBudgets(year),
         fetchSpWriteLocks(year),
       ]);
+      if (loadId !== yearLoadId) return;
       const evalDraft: Record<string, SpEvaluationDraft> = {};
       for (const e of evaluations) {
         evalDraft[e.taskCode] = {
@@ -255,6 +356,7 @@ export const useStrategicPlanStore = create<StrategicPlanState>((set, get) => ({
         entryLoading: false,
       });
     } catch {
+      if (loadId !== yearLoadId) return;
       set({
         entryLoading: false,
         saveError: '연도별 입력값을 불러오지 못했습니다.',
@@ -262,25 +364,20 @@ export const useStrategicPlanStore = create<StrategicPlanState>((set, get) => ({
     }
   },
 
-  setView: (view) => set({ view }),
+  setView: (view) => {
+    const state = get();
+    if (state.view === view) return;
+    const nextYear = yearForView(view, state.year);
+    rememberYear(view, nextYear);
+    beginYearChange(nextYear, { view }, { set, get });
+  },
   setGoalId: (goalId) => set({ goalId }),
   setDept: (dept) => set({ dept }),
   setQuery: (query) => set({ query }),
   setSpecializedOnly: (specializedOnly) => set({ specializedOnly }),
   setYear: (year) => {
-    set({ year });
-    void (async () => {
-      try {
-        const [tree, fundSources] = await Promise.all([
-          fetchSpTree(year),
-          fetchSpFundSources(false, year),
-        ]);
-        set({ tree, fundSources });
-      } catch {
-        set({ saveError: '해당 학년도 체계를 불러오지 못했습니다.' });
-      }
-      await get().loadEntries(year);
-    })();
+    rememberYear(get().view, year);
+    beginYearChange(year, {}, { set, get });
   },
   setCompareMode: (compareMode) => set({ compareMode }),
   toggleKpiSort: (key) =>
