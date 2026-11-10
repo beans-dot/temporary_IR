@@ -22,6 +22,7 @@ import {
   type SpKpiSortKey,
 } from '@/store/useStrategicPlanStore';
 import { SpCodeBadge } from '@/components/strategic-plan/SpCodeBadge';
+import { KpiTrendChart } from './KpiTrendChart';
 import { EmptyState, SectionLabel } from './ui';
 
 function sortValue(kpi: SpKpi, key: SpKpiSortKey, year: number) {
@@ -112,7 +113,7 @@ function DetailRow({
               {kpi.baselineRef ? ` (${kpi.baselineRef})` : ''}
             </p>
           </div>
-          <div>
+          <div className="sm:col-span-2">
             <SectionLabel>연도별 실적</SectionLabel>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               {years.map((year) => (
@@ -127,6 +128,10 @@ function DetailRow({
                   </span>
                 </span>
               ))}
+            </div>
+            <div className="mt-3 w-full">
+              <SectionLabel>변화 추이</SectionLabel>
+              <KpiTrendChart kpi={kpi} years={years} />
             </div>
           </div>
         </div>
