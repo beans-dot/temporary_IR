@@ -45,12 +45,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { logDataExport } from '@/lib/exportLog';
 import { renderMarker } from './ChartMarkers';
-import {
-  CorrDragGhost,
-  CorrelationPanel,
-  corrSlotFromPoint,
-  type CorrLegendItem,
-} from './CorrelationPanel';
 
 type YearHoverState = {
   year: number;
@@ -119,14 +113,10 @@ function EmphasisLegend({
   items,
   emphasizedKeys,
   onToggle,
-  dragEnabled,
-  onCorrPointerDown,
 }: {
   items: Array<{ key: string; label: string; color?: string }>;
   emphasizedKeys: Set<string>;
   onToggle: (key: string) => void;
-  dragEnabled?: boolean;
-  onCorrPointerDown?: (item: CorrLegendItem, e: React.PointerEvent) => void;
 }) {
   if (items.length === 0) return null;
   return (
@@ -137,24 +127,12 @@ function EmphasisLegend({
           <li key={item.key}>
             <button
               type="button"
-              onPointerDown={(e) => {
-                if (!dragEnabled || e.button !== 0) return;
-                onCorrPointerDown?.(item, e);
-              }}
-              onClick={() => {
-                if (dragEnabled) return;
-                onToggle(item.key);
-              }}
-              className={cn(
-                'inline-flex max-w-[280px] items-center gap-1.5 text-left text-xs text-foreground',
-                dragEnabled && 'cursor-grab active:cursor-grabbing',
-              )}
+              onClick={() => onToggle(item.key)}
+              className="inline-flex max-w-[280px] items-center gap-1.5 text-left text-xs text-foreground"
               title={
-                dragEnabled
-                  ? '드래그하면 상관계수 분석에 넣고, 짧게 클릭하면 선을 강조합니다'
-                  : on
-                    ? '강조 해제'
-                    : '클릭하면 이 선을 굵게 표시합니다'
+                on
+                  ? '강조 해제'
+                  : '클릭하면 이 선을 굵게 표시합니다'
               }
             >
               <span
@@ -359,27 +337,6 @@ export function HybridChart() {
   const [emphasizedKeys, setEmphasizedKeys] = useState<Set<string>>(
     () => new Set(),
   );
-  const [corrOpen, setCorrOpen] = useState(false);
-  const [corrSlots, setCorrSlots] = useState<[string | null, string | null]>([
-    null,
-    null,
-  ]);
-  const [corrGhost, setCorrGhost] = useState<{
-    label: string;
-    color?: string;
-    x: number;
-    y: number;
-  } | null>(null);
-  const [corrHoverSlot, setCorrHoverSlot] = useState<number | null>(null);
-  const corrPointerRef = useRef<{
-    key: string;
-    label: string;
-    color?: string;
-    fromSlot: number | null;
-    startX: number;
-    startY: number;
-    moved: boolean;
-  } | null>(null);
 
   useEffect(() => {
     api
@@ -402,7 +359,6 @@ export function HybridChart() {
 
   const seriesSignature = chartBase?.series.map((s) => s.key).join('|') ?? '';
   const unitClash = chartBase?.unitClash ?? false;
-  const corrDisabled = (chartBase?.data.length ?? 0) <= 1;
 
   // 단위 교차 선택 시 Index 모드 강제 + 알림
   useEffect(() => {
@@ -427,12 +383,7 @@ export function HybridChart() {
 
   useEffect(() => {
     setEmphasizedKeys(new Set());
-    setCorrSlots([null, null]);
   }, [seriesSignature]);
-
-  useEffect(() => {
-    if (corrDisabled) setCorrOpen(false);
-  }, [corrDisabled]);
 
   const toggleEmphasis = (key: string) => {
     setEmphasizedKeys((prev) => {
@@ -442,91 +393,6 @@ export function HybridChart() {
       return next;
     });
   };
-
-  const assignCorrSlot = (index: number, key: string) => {
-    setCorrSlots((prev) => {
-      const next: [string | null, string | null] = [prev[0], prev[1]];
-      const other = index === 0 ? 1 : 0;
-      if (next[other] === key) next[other] = null;
-      next[index] = key;
-      return next;
-    });
-  };
-
-  const clearCorrSlot = (index: number) => {
-    setCorrSlots((prev) => {
-      const next: [string | null, string | null] = [prev[0], prev[1]];
-      next[index] = null;
-      return next;
-    });
-  };
-
-  const toggleEmphasisRef = useRef(toggleEmphasis);
-  toggleEmphasisRef.current = toggleEmphasis;
-  const assignCorrSlotRef = useRef(assignCorrSlot);
-  assignCorrSlotRef.current = assignCorrSlot;
-  const clearCorrSlotRef = useRef(clearCorrSlot);
-  clearCorrSlotRef.current = clearCorrSlot;
-
-  const beginCorrPointer = (
-    item: CorrLegendItem,
-    fromSlot: number | null,
-    e: React.PointerEvent,
-  ) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    corrPointerRef.current = {
-      key: item.key,
-      label: item.label,
-      color: item.color,
-      fromSlot,
-      startX: e.clientX,
-      startY: e.clientY,
-      moved: false,
-    };
-  };
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      const d = corrPointerRef.current;
-      if (!d) return;
-      const dist = Math.hypot(e.clientX - d.startX, e.clientY - d.startY);
-      if (!d.moved && dist < 8) return;
-      d.moved = true;
-      document.body.style.userSelect = 'none';
-      setCorrGhost({
-        label: d.label,
-        color: d.color,
-        x: e.clientX,
-        y: e.clientY,
-      });
-      setCorrHoverSlot(corrSlotFromPoint(e.clientX, e.clientY));
-    };
-    const onUp = (e: PointerEvent) => {
-      const d = corrPointerRef.current;
-      if (!d) return;
-      corrPointerRef.current = null;
-      document.body.style.userSelect = '';
-      setCorrGhost(null);
-      setCorrHoverSlot(null);
-      if (!d.moved) {
-        if (d.fromSlot == null) toggleEmphasisRef.current(d.key);
-        return;
-      }
-      const slot = corrSlotFromPoint(e.clientX, e.clientY);
-      if (slot != null) assignCorrSlotRef.current(slot, d.key);
-      else if (d.fromSlot != null) clearCorrSlotRef.current(d.fromSlot);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      document.body.style.userSelect = '';
-    };
-  }, []);
 
   const handleScaleModeChange = (mode: ChartScaleMode) => {
     if (mode === 'absolute' && unitClash) {
@@ -683,19 +549,6 @@ export function HybridChart() {
             mode={scaleMode}
             onChange={handleScaleModeChange}
           />
-          <Button
-            variant={corrOpen ? 'default' : 'outline'}
-            size="sm"
-            disabled={corrDisabled}
-            title={
-              corrDisabled
-                ? '연도가 2개 이상일 때 상관계수를 계산할 수 있습니다.'
-                : undefined
-            }
-            onClick={() => setCorrOpen((v) => !v)}
-          >
-            상관계수 분석
-          </Button>
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="mr-1 h-4 w-4" /> PNG 저장
           </Button>
@@ -846,10 +699,6 @@ export function HybridChart() {
                     }))}
                     emphasizedKeys={emphasizedKeys}
                     onToggle={toggleEmphasis}
-                    dragEnabled={corrOpen}
-                    onCorrPointerDown={(item, e) =>
-                      beginCorrPointer(item, null, e)
-                    }
                   />
                 )}
               />
@@ -991,30 +840,10 @@ export function HybridChart() {
         <p className="mt-2 text-[11px] text-muted-foreground">
           범례 항목을 클릭하면 해당 선을 굵게 강조합니다. 다시 클릭하면
           해제됩니다.
-          {corrOpen
-            ? ' 상관계수 분석이 켜져 있으면 범례를 아래 칸으로 드래그할 수 있습니다.'
-            : ''}
           {annualEvents.length > 0
             ? ' 파란 밑줄 연도에 마우스를 올리면 해당 연도 변동사항을 확인할 수 있습니다.'
             : ''}
         </p>
-        {corrOpen ? (
-          <CorrelationPanel
-            slots={corrSlots}
-            items={series.map((s) => ({
-              key: s.key,
-              label: s.label,
-              color: styleMap[s.key]?.stroke,
-            }))}
-            data={originalData}
-            hoverSlot={corrHoverSlot}
-            onClear={clearCorrSlot}
-            onChipPointerDown={(index, item, e) =>
-              beginCorrPointer(item, index, e)
-            }
-          />
-        ) : null}
-        {corrGhost ? <CorrDragGhost drag={corrGhost} /> : null}
       </CardContent>
     </Card>
   );

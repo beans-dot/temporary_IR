@@ -18,6 +18,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  CorrDragGhost,
+  CorrelationPanel,
+  useCorrelationDrag,
+} from './CorrelationPanel';
 
 const COLUMNS: Array<{
   key: keyof DescriptiveStats;
@@ -61,6 +66,25 @@ export function DescriptiveStatsGrid() {
   );
   const hasData = rows.length > 0;
   const periodLabel = pivot?.years.length ? pivot.years.join(', ') : '';
+  const seriesSignature = rows.map((row) => row.key).join('|');
+  const correlation = useCorrelationDrag(seriesSignature);
+  const corrItems = useMemo(
+    () => rows.map((row) => ({ key: row.key, label: row.name })),
+    [rows],
+  );
+  const corrData = useMemo(() => {
+    if (!pivot) return [];
+    return pivot.years.map((year) => {
+      const point: Record<string, number | string | null> = { year };
+      for (const row of pivot.rows) {
+        const key = `${row.targetKey}-${row.metricId}`;
+        const value = row.values[year];
+        point[key] =
+          typeof value === 'number' && Number.isFinite(value) ? value : null;
+      }
+      return point;
+    });
+  }, [pivot]);
 
   const handleExcel = () => {
     if (!tableRef.current) return;
@@ -129,9 +153,17 @@ export function DescriptiveStatsGrid() {
                 {rows.map((row) => (
                   <tr key={row.key}>
                     <td
-                      className={`sticky left-0 z-10 border bg-card px-3 py-2 whitespace-nowrap ${
+                      className={`sticky left-0 z-10 cursor-grab border bg-card px-3 py-2 whitespace-nowrap active:cursor-grabbing ${
                         row.isYeonsung ? 'font-bold text-primary' : ''
                       }`}
+                      title="상관계수 분석 칸으로 드래그"
+                      onPointerDown={(e) =>
+                        correlation.beginPointer(
+                          { key: row.key, label: row.name },
+                          null,
+                          e,
+                        )
+                      }
                     >
                       {row.name}
                     </td>
@@ -149,6 +181,19 @@ export function DescriptiveStatsGrid() {
             </table>
           </div>
         )}
+        {hasData ? (
+          <CorrelationPanel
+            slots={correlation.slots}
+            items={corrItems}
+            data={corrData}
+            hoverSlot={correlation.hoverSlot}
+            onClear={correlation.clearSlot}
+            onChipPointerDown={(index, item, e) =>
+              correlation.beginPointer(item, index, e)
+            }
+          />
+        ) : null}
+        {correlation.ghost ? <CorrDragGhost drag={correlation.ghost} /> : null}
       </CardContent>
     </Card>
   );
