@@ -1,8 +1,8 @@
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateExportLogDto {
-  @IsIn(['xlsx', 'png', 'pdf', 'json'])
-  format: 'xlsx' | 'png' | 'pdf' | 'json';
+  @IsIn(['xlsx', 'png', 'pdf', 'json', 'md'])
+  format: 'xlsx' | 'png' | 'pdf' | 'json' | 'md';
 
   @IsString()
   @MaxLength(100)

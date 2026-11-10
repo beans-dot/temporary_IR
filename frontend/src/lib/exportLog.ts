@@ -1,6 +1,6 @@
 import { api } from '@/lib/api';
 
-export type ExportFormat = 'xlsx' | 'png' | 'pdf' | 'json';
+export type ExportFormat = 'xlsx' | 'png' | 'pdf' | 'json' | 'md';
 
 export function logDataExport(input: {
   format: ExportFormat;

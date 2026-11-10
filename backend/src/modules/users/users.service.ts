@@ -146,7 +146,8 @@ export class UsersService {
       format !== 'xlsx' &&
       format !== 'png' &&
       format !== 'pdf' &&
-      format !== 'json'
+      format !== 'json' &&
+      format !== 'md'
     ) {
       throw new BadRequestException('지원하지 않는 내보내기 형식입니다.');
     }

@@ -16,7 +16,7 @@ interface ActivityEntry {
   userName: string | null;
   ip: string | null;
   success: boolean;
-  format: 'xlsx' | 'png' | 'pdf' | 'json' | null;
+  format: 'xlsx' | 'png' | 'pdf' | 'json' | 'md' | null;
   filename: string | null;
   summary: string | null;
   source: string | null;
@@ -55,8 +55,10 @@ function formatExportLabel(entry: ActivityEntry) {
         ? 'PNG'
         : entry.format === 'pdf'
           ? 'PDF'
-          : entry.format === 'json'
-            ? 'JSON'
+        : entry.format === 'json'
+          ? 'JSON'
+          : entry.format === 'md'
+            ? '마크다운'
             : '';
   const parts = [format, entry.filename, entry.summary].filter(Boolean);
   return parts.join(' · ') || '파일 다운로드';

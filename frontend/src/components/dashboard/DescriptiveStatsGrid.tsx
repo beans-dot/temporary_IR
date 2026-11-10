@@ -2,13 +2,18 @@
 
 import { useMemo, useRef } from 'react';
 import { usePathname } from 'next/navigation';
-import { FileSpreadsheet } from 'lucide-react';
+import { FileSpreadsheet, FileText } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
   descriptiveStatsFromPivot,
   type DescriptiveStats,
 } from '@/lib/descriptiveStats';
 import { logDataExport } from '@/lib/exportLog';
+import {
+  buildQueryMarkdown,
+  queryMarkdownFilename,
+  type QueryMarkdownScreen,
+} from '@/lib/queryMarkdown';
 import { useAnalysisStore } from '@/store/AnalysisStoreProvider';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,6 +62,14 @@ function formatCell(stats: DescriptiveStats, key: keyof DescriptiveStats): strin
 
 export function DescriptiveStatsGrid() {
   const pivot = useAnalysisStore((s) => s.pivot);
+  const loading = useAnalysisStore((s) => s.loading);
+  const relativeLoading = useAnalysisStore((s) => s.relativeLoading);
+  const analysisScope = useAnalysisStore((s) => s.analysisScope);
+  const hierarchyIntegrate = useAnalysisStore((s) => s.hierarchyIntegrate);
+  const relativeExpand = useAnalysisStore((s) => s.relativeExpand);
+  const relativeScales = useAnalysisStore((s) => s.relativeScales);
+  const selectedTargets = useAnalysisStore((s) => s.selectedTargets);
+  const selectedMetrics = useAnalysisStore((s) => s.selectedMetrics);
   const tableRef = useRef<HTMLTableElement>(null);
   const pathname = usePathname();
 
@@ -65,6 +78,7 @@ export function DescriptiveStatsGrid() {
     [pivot],
   );
   const hasData = rows.length > 0;
+  const markdownBusy = loading || relativeLoading;
   const periodLabel = pivot?.years.length ? pivot.years.join(', ') : '';
   const seriesSignature = rows.map((row) => row.key).join('|');
   const correlation = useCorrelationDrag(seriesSignature);
@@ -105,7 +119,53 @@ export function DescriptiveStatsGrid() {
     });
   };
 
+  const handleMarkdown = () => {
+    if (!pivot || pivot.rows.length === 0 || markdownBusy) return;
+    const screen: QueryMarkdownScreen =
+      analysisScope === 'internal' ? 'internal' : 'disclosure';
+    const generatedAt = new Date();
+    const markdown = buildQueryMarkdown({
+      screen,
+      generatedAt,
+      hierarchyIntegrate,
+      relativeExpand,
+      targets: selectedTargets.map((target) => ({
+        label: target.label,
+        isYeonsung: target.isYeonsung,
+        mode: target.mode,
+        univCode: target.univCode,
+        deptCode: target.deptCode,
+        memberUnivCount: target.memberUnivCodes?.length ?? 0,
+        memberDeptCount: target.memberDeptCodes?.length ?? 0,
+      })),
+      metrics: selectedMetrics.map((metric) => ({
+        metricName: metric.metricName,
+        unit: metric.unit,
+        sourceType: metric.sourceType,
+      })),
+      pivot,
+      relativeScales,
+    });
+    const filename = queryMarkdownFilename(screen, generatedAt);
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    logDataExport({
+      format: 'md',
+      source: screen === 'internal' ? 'competitiveness-markdown' : 'dashboard-markdown',
+      filename,
+      summary: `조회 데이터 마크다운 ${pivot.rows.length}행 · 상대비교 ${relativeScales.length}지표 · ${pivot.years.join(', ')}`,
+    });
+  };
+
   return (
+    <>
     <Card>
       <CardHeader className="flex-row items-start justify-between space-y-0 gap-4">
         <div className="space-y-1.5">
@@ -196,5 +256,16 @@ export function DescriptiveStatsGrid() {
         {correlation.ghost ? <CorrDragGhost drag={correlation.ghost} /> : null}
       </CardContent>
     </Card>
+    <div className="flex justify-start">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={handleMarkdown}
+        disabled={!hasData || markdownBusy}
+      >
+        <FileText className="mr-1 h-4 w-4" /> 데이터 마크다운
+      </Button>
+    </div>
+    </>
   );
 }

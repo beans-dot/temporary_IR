@@ -5,7 +5,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-export type ExportFormat = 'xlsx' | 'png' | 'pdf' | 'json';
+export type ExportFormat = 'xlsx' | 'png' | 'pdf' | 'json' | 'md';
 
 @Entity('ir_export_log')
 export class IrExportLog {
