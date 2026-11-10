@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Ticker } from './Ticker';
 
+const UNIVERSITY_HOME = 'https://www.yeonsung.ac.kr/';
+
 const NAV: Array<{ href: string; label: string; roles: UserRole[] }> = [
   { href: '/admin', label: '시스템관리', roles: ['admin'] },
   {
@@ -52,21 +54,28 @@ export function Header() {
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-background/95 backdrop-blur">
       <div className="flex h-16 min-w-0 items-center gap-2 px-3 sm:gap-4 sm:px-6">
-        <Link
-          href={homeHref}
-          className="flex min-w-0 max-w-[70%] shrink items-center gap-4 sm:max-w-none sm:shrink-0 sm:gap-6"
-        >
-          <div className="relative h-[34px] w-[154px] shrink-0 sm:h-[39px] sm:w-[177px]">
+        <div className="flex min-w-0 max-w-[70%] shrink items-center gap-4 sm:max-w-none sm:shrink-0 sm:gap-6">
+          <a
+            href={UNIVERSITY_HOME}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="연성대학교 홈페이지"
+            className="relative h-[34px] w-[154px] shrink-0 sm:h-[39px] sm:w-[177px]"
+          >
             <Image
               src="/logo.png"
-              alt="연성대학교"
+              alt="연성대학교 홈페이지"
               fill
               sizes="(max-width: 640px) 154px, 177px"
               style={{ objectFit: 'contain' }}
               priority
             />
-          </div>
-          <div className="relative h-[20px] w-[122px] min-w-0 shrink sm:h-[24px] sm:w-[145px] sm:shrink-0">
+          </a>
+          <Link
+            href={homeHref}
+            title="YSU IR Library 홈"
+            className="relative h-[20px] w-[122px] min-w-0 shrink sm:h-[24px] sm:w-[145px] sm:shrink-0"
+          >
             <Image
               src="/ysu-ir-library-wordmark.png"
               alt="YSU IR Library"
@@ -75,8 +84,8 @@ export function Header() {
               style={{ objectFit: 'contain', objectPosition: 'left center' }}
               priority
             />
-          </div>
-        </Link>
+          </Link>
+        </div>
 
         {hydrated && user && (
           <>
