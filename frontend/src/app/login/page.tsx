@@ -1,12 +1,9 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Card,
   CardContent,
@@ -19,8 +16,6 @@ import { homePathForRole, useAuthStore } from '@/store/useAuthStore';
 export default function LoginPage() {
   const router = useRouter();
   const { user, hydrated, hydrate, login } = useAuthStore();
-  const [id, setId] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [quickTarget, setQuickTarget] = useState<'admin' | 'user' | null>(null);
@@ -34,19 +29,6 @@ export default function LoginPage() {
       router.replace(homePathForRole(user.role));
     }
   }, [hydrated, user, router]);
-
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    const result = await login(id, password);
-    setSubmitting(false);
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    router.replace(homePathForRole(result.user.role));
-  };
 
   const quickLogin = async (
     loginId: string,
@@ -68,7 +50,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-12">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-lg">
         <CardHeader className="space-y-4 text-center">
           <div className="relative mx-auto h-12 w-[8.25rem] sm:h-14 sm:w-[9.6rem]">
             <Image
@@ -81,96 +63,52 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <CardTitle className="text-2xl">로그인</CardTitle>
+            <CardTitle className="text-2xl">테스트 로그인</CardTitle>
             <CardDescription className="mt-2">
-              연성대학교 IR 대시보드에 접속하려면 로그인하세요.
+              YSU IR Library
             </CardDescription>
           </div>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="login-id">아이디</Label>
-              <Input
-                id="login-id"
-                autoComplete="username"
-                value={id}
-                onChange={(e) => setId(e.target.value)}
-                placeholder="아이디"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="login-password">비밀번호</Label>
-              <Input
-                id="login-password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="비밀번호"
-                required
-              />
-            </div>
-            {error && (
-              <p className="text-sm text-destructive whitespace-pre-line" role="alert">
-                {error}
-              </p>
-            )}
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting && !quickTarget ? '로그인 중…' : '로그인'}
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
+            <p>
+              시연을 위한 더미 데이터 버전입니다. 아래 테스트 로그인을 클릭하시어 시연을 해보시기 바랍니다.
+            </p>
+            <p className="mt-3">
+              실제 운영 서버의 경우 연성대학교 재직 교직원 중 허가받은 인원만 접근이 가능합니다.
+            </p>
+          </div>
+          {error && (
+            <p className="whitespace-pre-line text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => quickLogin('admin', '21672167', 'admin')}
+              disabled={submitting}
+              className="h-auto flex-col items-start rounded-lg px-4 py-4 text-left"
+            >
+              <span className="text-sm font-bold">관리자 테스트 로그인</span>
+              <span className="mt-1 text-xs text-muted-foreground">
+                {quickTarget === 'admin' ? '로그인 중…' : '관리자 기능 체험'}
+              </span>
             </Button>
-            <div className="space-y-2 pt-1">
-              <p className="text-center text-xs font-medium text-muted-foreground">
-                테스트 로그인
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => quickLogin('admin', '21672167', 'admin')}
-                  disabled={submitting}
-                  className="rounded-lg border border-input bg-background px-3 py-3 text-left transition-colors hover:bg-accent disabled:opacity-50"
-                >
-                  <span className="block text-sm font-bold">admin으로 로그인</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {quickTarget === 'admin' ? '로그인 중…' : '관리자'}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => quickLogin('test_user_1', 'test1234', 'user')}
-                  disabled={submitting}
-                  className="rounded-lg border border-input bg-background px-3 py-3 text-left transition-colors hover:bg-accent disabled:opacity-50"
-                >
-                  <span className="block text-sm font-bold">user로 로그인</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {quickTarget === 'user'
-                      ? '로그인 중…'
-                      : 'test_user_1 · 조회'}
-                  </span>
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
-              <p>
-                계정이 없으신가요?{' '}
-                <Link
-                  href="/signup"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  회원가입
-                </Link>
-              </p>
-              <p>
-                <Link
-                  href="/find-account"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  아이디/비밀번호 찾기
-                </Link>
-              </p>
-            </div>
-          </form>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => quickLogin('test_user_1', 'test1234', 'user')}
+              disabled={submitting}
+              className="h-auto flex-col items-start rounded-lg px-4 py-4 text-left"
+            >
+              <span className="text-sm font-bold">사용자 테스트 로그인</span>
+              <span className="mt-1 text-xs text-muted-foreground">
+                {quickTarget === 'user' ? '로그인 중…' : '조회·분석 기능 체험'}
+              </span>
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>
