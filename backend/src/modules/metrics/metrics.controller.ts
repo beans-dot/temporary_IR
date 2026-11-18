@@ -16,6 +16,12 @@ import { MetricsService } from './metrics.service';
 export class MetricsController {
   constructor(private readonly metricsService: MetricsService) {}
 
+  /** 조회 화면의 출처별 실제 데이터 보유 연도 */
+  @Get('years')
+  listAvailableYears(@Query('sourceType') sourceType?: string) {
+    return this.metricsService.listAvailableYears(parseMetricSourceType(sourceType));
+  }
+
   // 업무 주제별 카테고리 지표 트리 (Dual-Listbox 모달용)
   @Get('tree')
   getTree(

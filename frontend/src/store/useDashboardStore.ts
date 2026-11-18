@@ -1,7 +1,8 @@
 'use client';
 
 import { create } from 'zustand';
-import { api, type PivotResult, type TargetTreeNode } from '@/lib/api';
+import { api, fetchAnalysisYears, type PivotResult, type TargetTreeNode } from '@/lib/api';
+import { normalizeYears, selectAvailableYearRange } from '@/lib/yearRange';
 import {
   buildRelativeScales,
   buildRelativeScalesFromPivotRows,
@@ -54,6 +55,9 @@ export interface DashboardState {
   selectedTargets: SelectedTarget[];
   selectedMetrics: SelectedMetric[];
   years: number[];
+  availableYears: number[];
+  yearsStatus: 'idle' | 'loading' | 'ready' | 'error';
+  yearSelectionMode: 'all' | 'range';
   chartOptions: ChartOptions;
   /** 하위 위계가 모두 선택되면 상위 위계 평균으로 접기 */
   hierarchyIntegrate: boolean;
@@ -86,6 +90,7 @@ export interface DashboardState {
   /** 대상·지표 선택과 조회 결과만 비움 (연도·차트옵션은 유지) */
   resetSelections: () => void;
   setYears: (years: number[]) => void;
+  loadAvailableYears: () => Promise<void>;
   deletePreset: (presetId: number) => Promise<void>;
   setChartOption: <K extends keyof ChartOptions>(
     key: K,
@@ -104,26 +109,6 @@ export interface DashboardState {
     relativeExpand?: RelativeExpandOptions;
   }) => void;
   serialize: () => Record<string, unknown>;
-}
-
-/** 공시 화면은 2023년부터, 자체 경쟁력은 2020년부터 조회한다. */
-export const MIN_AVAILABLE_YEAR = 2023;
-export const MIN_INTERNAL_YEAR = 2020;
-
-export function minAvailableYear(scope: AnalysisScope): number {
-  return scope === 'internal' ? MIN_INTERNAL_YEAR : MIN_AVAILABLE_YEAR;
-}
-
-function defaultYearsFor(minYear: number): number[] {
-  const currentYear = new Date().getFullYear();
-  return [0, 1, 2, 3, 4]
-    .map((offset) => currentYear - offset)
-    .filter((year) => year >= minYear)
-    .sort((a, b) => a - b);
-}
-
-function filterAvailableYears(years: number[], minYear: number): number[] {
-  return [...years].filter((year) => year >= minYear).sort((a, b) => a - b);
 }
 
 function normalizeTarget(t: SelectedTarget): SelectedTarget {
@@ -227,13 +212,15 @@ async function fetchInternalRelativeScales(
 }
 
 export function createAnalysisStore(analysisScope: AnalysisScope) {
-  const minYear = minAvailableYear(analysisScope);
   return create<DashboardState>((set, get) => ({
   analysisScope,
   targetTree: [],
   selectedTargets: [],
   selectedMetrics: [],
-  years: defaultYearsFor(minYear),
+  years: [],
+  availableYears: [],
+  yearsStatus: 'idle',
+  yearSelectionMode: 'all',
   chartOptions: {
     showDataLabels: false,
     showTrendline: false,
@@ -365,7 +352,36 @@ export function createAnalysisStore(analysisScope: AnalysisScope) {
       pivot: null,
       relativeScales: [],
     }),
-  setYears: (years) => set({ years: filterAvailableYears(years, minYear) }),
+  setYears: (years) => set((state) => {
+    const selected = state.yearsStatus === 'ready'
+      ? selectAvailableYearRange(years, state.availableYears)
+      : normalizeYears(years);
+    return {
+      years: selected,
+      yearSelectionMode:
+        selected.length === state.availableYears.length ? 'all' : 'range',
+    };
+  }),
+  loadAvailableYears: async () => {
+    if (get().yearsStatus === 'loading') return;
+    set({ yearsStatus: 'loading' });
+    try {
+      const availableYears = normalizeYears(await fetchAnalysisYears(
+        analysisScope === 'internal' ? 'INTERNAL' : 'ALIMI',
+      ));
+      set((state) => ({
+        availableYears,
+        years: !availableYears.length
+          ? []
+          : state.yearSelectionMode === 'all'
+            ? availableYears
+            : selectAvailableYearRange(state.years, availableYears),
+        yearsStatus: 'ready',
+      }));
+    } catch {
+      set({ yearsStatus: 'error' });
+    }
+  },
   deletePreset: async (presetId) => {
     await api.delete(`/presets/${presetId}`);
   },
@@ -495,7 +511,10 @@ export function createAnalysisStore(analysisScope: AnalysisScope) {
     set((s) => ({
       selectedTargets: (state.selectedTargets ?? []).map(normalizeTarget),
       selectedMetrics: state.selectedMetrics,
-      years: filterAvailableYears(state.years ?? [], minYear),
+      years: s.yearsStatus === 'ready'
+        ? selectAvailableYearRange(state.years ?? [], s.availableYears)
+        : normalizeYears(state.years ?? []),
+      yearSelectionMode: state.years?.length ? 'range' : 'all',
       chartOptions: state.chartOptions
         ? { ...s.chartOptions, ...state.chartOptions }
         : s.chartOptions,

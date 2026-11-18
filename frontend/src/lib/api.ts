@@ -56,6 +56,13 @@ api.interceptors.response.use(
 
 export type MetricSourceType = 'ALIMI' | 'INTERNAL' | 'MONITORING';
 
+export async function fetchAnalysisYears(sourceType: 'ALIMI' | 'INTERNAL') {
+  const { data } = await api.get<number[]>('/metrics/years', {
+    params: { sourceType },
+  });
+  return data;
+}
+
 export interface MetricNode {
   metricId: number;
   /** 시드 지표 고유 코드(모니터링). 지표명을 바꿔도 유지되는 매칭 기준 */

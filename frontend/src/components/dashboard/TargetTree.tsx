@@ -345,6 +345,7 @@ export function TargetTree() {
   const years = useAnalysisStore((s) => s.years);
 
   useEffect(() => {
+    let cancelled = false;
     const catalogYear = years.length ? Math.max(...years) : undefined;
     const path =
       analysisScope === 'internal'
@@ -355,6 +356,7 @@ export function TargetTree() {
     api
       .get<TargetTreeNode[]>(path)
       .then(({ data }) => {
+        if (cancelled) return;
         // 공시(library): 대학 단위만 조회 → 연성대 계열·학과 위계는 노출하지 않음
         const next =
           analysisScope === 'disclosure'
@@ -364,10 +366,14 @@ export function TargetTree() {
         setTargetTree(next);
       })
       .catch(() => {
+        if (cancelled) return;
         setTree([]);
         setTargetTree([]);
       })
-      .finally(() => setLoaded(true));
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => { cancelled = true; };
   }, [setTargetTree, analysisScope, years]);
 
   return (

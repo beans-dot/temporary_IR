@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import html2canvas from 'html2canvas';
-import { Download } from 'lucide-react';
+import { ChevronDown, Download, SlidersHorizontal } from 'lucide-react';
 import {
   Bar,
   CartesianGrid,
@@ -44,6 +44,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { logDataExport } from '@/lib/exportLog';
+import { ChartOptionsPanel } from './ChartOptionsPanel';
 import { renderMarker } from './ChartMarkers';
 
 type YearHoverState = {
@@ -327,6 +328,8 @@ export function HybridChart() {
   const options = useAnalysisStore((s) => s.chartOptions);
   const chartRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
+  const optionsId = useId();
+  const [optionsOpen, setOptionsOpen] = useState(false);
 
   const [scaleMode, setScaleMode] = useState<ChartScaleMode>('absolute');
   const [unitClashNotice, setUnitClashNotice] = useState<string | null>(null);
@@ -441,14 +444,39 @@ export function HybridChart() {
     });
   };
 
+  const optionsToggle = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      aria-expanded={optionsOpen}
+      aria-controls={optionsId}
+      onClick={() => setOptionsOpen((open) => !open)}
+      className={cn(optionsOpen && 'border-primary/40 bg-primary/10 text-primary')}
+    >
+      <SlidersHorizontal className="mr-1.5 h-4 w-4" />
+      차트 옵션
+      <ChevronDown className={cn('ml-1.5 h-3.5 w-3.5 transition-transform', optionsOpen && 'rotate-180')} />
+    </Button>
+  );
+  const optionsPanel = (
+    <div id={optionsId} hidden={!optionsOpen} className="mb-5 rounded-lg border border-primary/20 bg-primary/5 p-4">
+      <ChartOptionsPanel />
+    </div>
+  );
+
   if (!hasData || !chartBase) {
     return (
       <Card>
-        <CardHeader>
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0">
           <CardTitle>추이 차트</CardTitle>
+          {optionsToggle}
         </CardHeader>
-        <CardContent className="flex h-80 items-center justify-center text-muted-foreground">
-          대상과 지표를 선택하면 차트가 표시됩니다.
+        <CardContent>
+          {optionsPanel}
+          <div className="flex h-80 items-center justify-center text-muted-foreground">
+            대상과 지표를 선택하면 차트가 표시됩니다.
+          </div>
         </CardContent>
       </Card>
     );
@@ -545,6 +573,7 @@ export function HybridChart() {
       <CardHeader className="flex-row flex-wrap items-center justify-between gap-3 space-y-0">
         <CardTitle>추이 차트</CardTitle>
         <div className="flex flex-wrap items-center gap-2">
+          {optionsToggle}
           <ScaleModeToggle
             mode={scaleMode}
             onChange={handleScaleModeChange}
@@ -555,6 +584,7 @@ export function HybridChart() {
         </div>
       </CardHeader>
       <CardContent>
+        {optionsPanel}
         {truncated && (
           <div
             role="status"

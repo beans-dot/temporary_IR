@@ -67,6 +67,25 @@ export class MetricsService {
     private readonly rawRepo: Repository<IrRawData>,
   ) {}
 
+  async listAvailableYears(sourceType?: MetricSourceType): Promise<number[]> {
+    const query = this.rawRepo
+      .createQueryBuilder('r')
+      .innerJoin('r.metric', 'm')
+      .select('r.year', 'year')
+      .distinct(true)
+      .where("TRIM(r.metricValue) <> ''")
+      .andWhere("UPPER(TRIM(r.metricValue)) <> 'NULL'");
+
+    if (sourceType) {
+      query.andWhere('m.sourceType = :sourceType', { sourceType });
+    }
+
+    const rows = await query
+      .orderBy('r.year', 'ASC')
+      .getRawMany<{ year: string | number }>();
+    return rows.map((row) => Number(row.year)).filter(Number.isInteger);
+  }
+
   private domainReady = false;
 
   /** 레거시 미분류 지표용 「분류없음」 카테고리를 출처별로 보장한다. */

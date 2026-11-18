@@ -15,11 +15,11 @@ export default function CompetitivenessPage() {
       <AnalysisStoreProvider store={useCompetitivenessStore}>
         <div className="px-6 py-6">
           <h1 className="mb-4 text-2xl">학과별 자체 경쟁력 분석 지표</h1>
-          <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
+          <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
             <div>
               <FilterControls />
             </div>
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               <HybridChart />
               <RelativeComparePanel />
               <PivotDataGrid />
